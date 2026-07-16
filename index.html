@@ -285,6 +285,7 @@
       &nbsp;Last updated: <span id="lastUpdated">—</span>
     </span>
   </div>
+  <div id="debugLog" style="margin-top:6px;font-size:10.5px;color:#9aa0a6;word-break:break-all;"></div>
 
 </div>
 
@@ -474,69 +475,143 @@ function applyGameData(away, home, status){
   recalc();
 }
 
-function buildLookupPrompt(){
-  return `Search the web for the live score of today's WNBA game between the Golden State Valkyries and the Indiana Fever (today is ${todayStr()}). Find the current quarter-by-quarter score (points scored IN each quarter, not cumulative), the game state, current period, and time remaining in the current quarter.
+const SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/scoreboard";
 
-Respond with ONLY a raw JSON object, no markdown code fences, no commentary before or after. Match this exact shape:
-{"found":true,"state":"in","period":2,"clock":"6:15","detail":"6:15 - 2nd Quarter","away":{"name":"Golden State Valkyries","q1":22,"q2":8,"q3":0,"q4":0},"home":{"name":"Indiana Fever","q1":18,"q2":10,"q3":0,"q4":0}}
+// Try several public CORS proxies in order, since any one of them can be
+// down or rate-limited at a given moment. Each entry returns a fetchable
+// URL for a given target, and all of them pass the JSON straight through
+// (no wrapper object to unwrap).
+const PROXIES = [
+  url => "https://corsproxy.io/?url=" + encodeURIComponent(url),
+  url => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
+  url => "https://thingproxy.freeboard.io/fetch/" + url,
+  url => url // last resort: try the direct request in case CORS isn't actually blocking here
+];
 
-Rules:
-- state is one of "pre", "in", "post"
-- period is the current quarter number (0 if the game hasn't tipped off)
-- clock is the time remaining in the current quarter as "MM:SS", or null if not in progress or final
-- q1-q4 are points scored BY EACH TEAM IN THAT SPECIFIC QUARTER ONLY (not running totals), use 0 for quarters not yet played
-- If you cannot find this specific game today, respond with exactly {"found":false}
-- Output nothing except the JSON object itself`;
+function ymd(d){
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,"0");
+  const day = String(d.getDate()).padStart(2,"0");
+  return `${y}${m}${day}`;
 }
 
-function extractJson(text){
-  const cleaned = text.replace(/```json/gi, "").replace(/```/g, "").trim();
-  const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
-  if(start === -1 || end === -1) throw new Error("no JSON object found in response");
-  return JSON.parse(cleaned.slice(start, end+1));
+// ESPN's scoreboard endpoint defaults to "today" only. Widen the window
+// a few days either side so the target game is found even if it fell
+// on a different date than the viewer's local "today".
+function targetUrls(){
+  const today = new Date();
+  const start = new Date(today); start.setDate(start.getDate() - 3);
+  const end = new Date(today); end.setDate(end.getDate() + 3);
+  return [
+    `${SCOREBOARD_URL}?dates=${ymd(start)}-${ymd(end)}`,
+    SCOREBOARD_URL // plain fallback, matches ESPN's default "today" behavior
+  ];
+}
+
+// Full attempt list: every target URL through every proxy, in order.
+function scoreboardUrls(){
+  const attempts = [];
+  for(const target of targetUrls()){
+    for(const wrap of PROXIES){
+      attempts.push(wrap(target));
+    }
+  }
+  return attempts;
+}
+
+function shortUrl(url){
+  if(url.includes("corsproxy.io")) return "corsproxy.io";
+  if(url.includes("allorigins")) return "allorigins.win";
+  if(url.includes("thingproxy")) return "thingproxy";
+  return "direct";
+}
+
+function findTargetEvent(events){
+  const isValkyries = t => /valkyries/i.test(t.displayName || t.name || "");
+  const isFever = t => /fever/i.test(t.displayName || t.name || "");
+  for(const ev of (events || [])){
+    const comp = (ev.competitions || [])[0];
+    if(!comp) continue;
+    const teams = (comp.competitors || []).map(c => c.team || {});
+    if(teams.some(isValkyries) && teams.some(isFever)) return ev;
+  }
+  return null;
+}
+
+function quarterPoints(linescores, period){
+  if(!Array.isArray(linescores)) return 0;
+  const entry = linescores.find(l => l.period === period);
+  return entry ? num(entry.value) : 0;
+}
+
+function parseEvent(ev){
+  const comp = ev.competitions[0];
+  const competitors = comp.competitors || [];
+  const awayC = competitors.find(c => c.homeAway === "away");
+  const homeC = competitors.find(c => c.homeAway === "home");
+
+  const toTeam = c => ({
+    name: (c.team && c.team.displayName) || "Team",
+    q1: quarterPoints(c.linescores, 1),
+    q2: quarterPoints(c.linescores, 2),
+    q3: quarterPoints(c.linescores, 3),
+    q4: quarterPoints(c.linescores, 4)
+  });
+
+  const statusBlock = comp.status || ev.status || {};
+  const type = statusBlock.type || {};
+  const state = type.state || "pre"; // 'pre' | 'in' | 'post'
+  const period = statusBlock.period || 0;
+  const clock = state === "in" ? (statusBlock.displayClock || null) : null;
+  const detail = type.detail || type.shortDetail || null;
+
+  return {
+    away: toTeam(awayC),
+    home: toTeam(homeC),
+    status: { period, clock, state, detail }
+  };
 }
 
 async function fetchScore(){
   try{
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1000,
-        messages: [{ role: "user", content: buildLookupPrompt() }],
-        tools: [{ type: "web_search_20250305", name: "web_search" }]
-      })
-    });
-    if(!res.ok) throw new Error("API error " + res.status);
-    const data = await res.json();
-    const text = (data.content || [])
-      .map(block => block.type === "text" ? block.text : "")
-      .filter(Boolean)
-      .join("\n");
-    const parsed = extractJson(text);
+    let ev = null;
+    let lastErr = null;
+    const attemptLog = [];
+    for(const url of scoreboardUrls()){
+      try{
+        const res = await fetch(url);
+        if(!res.ok){
+          attemptLog.push(`${shortUrl(url)} → HTTP ${res.status}`);
+          throw new Error("API error " + res.status);
+        }
+        const data = await res.json();
+        ev = findTargetEvent(data.events || []);
+        attemptLog.push(`${shortUrl(url)} → OK, ${(data.events||[]).length} events${ev ? ", match found" : ""}`);
+        if(ev) break;
+      } catch(e){
+        attemptLog.push(`${shortUrl(url)} → FAILED: ${e.message || e}`);
+        lastErr = e;
+      }
+    }
+    $("debugLog").textContent = attemptLog.join("  |  ");
 
-    if(!parsed.found){
+    if(!ev && lastErr) throw lastErr;
+
+    if(!ev){
       failCount++;
       setStatus("Game not found yet", false);
-      showBanner("Couldn't find the Valkyries vs. Fever game yet. Retrying automatically — you can also enter scores manually below.");
+      showBanner("Couldn't find the Valkyries vs. Fever game on ESPN's scoreboard yet. Retrying automatically — you can also enter scores manually below.");
       if(failCount >= 2) enableManualEntry();
       return;
     }
+
+    const parsed = parseEvent(ev);
 
     showBanner(null);
     liveMode = true;
     failCount = 0;
 
-    const status = {
-      period: parsed.period || 0,
-      clock: parsed.clock || null,
-      state: parsed.state || "pre",
-      detail: parsed.detail || null
-    };
-
-    applyGameData(parsed.away, parsed.home, status);
+    applyGameData(parsed.away, parsed.home, parsed.status);
     $("lastUpdated").textContent = new Date().toLocaleTimeString();
 
   } catch(err){
@@ -544,7 +619,7 @@ async function fetchScore(){
     console.error("Score fetch failed:", err);
     if(!liveMode){
       setStatus("Live fetch unavailable", false);
-      showBanner("Live score lookup failed. You can enter each quarter's score manually below and the sheet will still calculate everything live.");
+      showBanner("Live score lookup failed. See attempt log below for details. You can enter each quarter's score manually below and the sheet will still calculate everything live.");
       if(failCount >= 2) enableManualEntry();
     }
   }
