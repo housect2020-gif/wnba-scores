@@ -198,7 +198,7 @@
       <tr class="hdr-row">
         <td class="rownum">1</td>
         <td>Team</td><td>Q1</td><td>Q2</td><td>Q3</td><td>Avg Q1-3</td>
-        <td>Q4=6 min</td><td>T=42 min</td><td>Q4</td><td>Total</td>
+        <td>Q4=5 min</td><td>T=35 min</td><td>Q4</td><td>Total</td>
         <td>O/U</td><td>Odds</td><td>Diff.</td><td>Suggested Pick</td>
       </tr>
 
@@ -233,7 +233,7 @@
         <td class="blank"></td>
         <td class="formula" id="K3">–</td>
         <td class="formula" id="L3">–</td>
-        <td class="blank"></td>
+        <td class="formula" id="M3">–</td>
       </tr>
 
       <tr>
@@ -315,6 +315,11 @@ function showBanner(msg){
 
 function round0(n){ return Math.round(n); }
 
+function round0AvgB4D4(B4, C4, D4){
+  const avg = (B4 + C4 + D4) / 3; // AVERAGE(B4:D4)
+  return Math.round(avg * 10) / 10; // ROUND(...,1)
+}
+
 function fmt(n, decimals){
   if(n === null || n === undefined || isNaN(n)) return "–";
   return decimals ? Number(n).toFixed(decimals) : String(round0(n));
@@ -391,14 +396,14 @@ function recalc(){
   const combined = round0(sumQ13 + avgRounded);
   $("K3").textContent = `${round0(sumQ13)} (Avg: ${avgRounded}) = ${combined}`;
 
-  // Row 5 (Predicted)
-  const B5 = (B4/12)*48;
-  const C5 = (C4/12)*48;
-  const D5 = (D4/12)*48;
+  // Row 5 (Predicted) — Q4 window is 5 min, full-game basis is 40 min (spec: T=35 min header, 40 min in formulas)
+  const B5 = (B4/10)*40;
+  const C5 = (C4/10)*40;
+  const D5 = (D4/10)*40;
   const E5 = (B5+C5+D5)/3;
-  const F5 = (F4/6)*48;
+  const F5 = (F4/5)*40;
   const validQtrs = [B5,C5,D5].filter(v => !isNaN(v)).length;
-  const G5 = (B5+C5+D5 + ((F4*2)/12)*48) / (validQtrs + 1);
+  const G5 = (B5+C5+D5 + ((F4*2)/10)*40) / (validQtrs + 1);
   const I5 = I2+I3;
 
   $("B5").textContent = fmt(B5);
@@ -409,6 +414,21 @@ function recalc(){
   $("G5").textContent = fmt(G5);
   $("I5").textContent = fmt(I5);
 
+  // M3 = IF(F4=0,"", IF(F4>=23, IF(ROUND(AVERAGE(B4:D4),1)>(F4*2),"Below Avg","Above Avg"),
+  //                              IF(ROUND(AVERAGE(B4:D4),1)>(F4*2),"Below Avg","Above Avg")))
+  // (both branches of the F4>=23 check are identical, so this simplifies to the inner IF,
+  //  but implemented as written for fidelity)
+  const avgB4D4 = round0AvgB4D4(B4, C4, D4);
+  let M3;
+  if(F4 === 0){
+    M3 = "";
+  } else if(F4 >= 23){
+    M3 = (avgB4D4 > (F4*2)) ? "Below Avg" : "Above Avg";
+  } else {
+    M3 = (avgB4D4 > (F4*2)) ? "Below Avg" : "Above Avg";
+  }
+  $("M3").textContent = M3 === "" ? "–" : M3;
+
   const K5 = $("K5").value === "" ? null : Number($("K5").value);
   const L3 = K5 === null ? "–" : fmt(Math.abs(sumQ13 - K5), 1);
   $("L3").textContent = L3;
@@ -416,8 +436,28 @@ function recalc(){
   const L5 = K5 === null ? "–" : fmt(Math.abs(K5 - I5), 1);
   $("L5").textContent = L5;
 
-  const M5 = K5 === null ? "–" : (K5 > G5 ? "Under" : "Over");
-  $("M5").textContent = M5;
+  // M5 = IF(OR(ISBLANK(F2),ISBLANK(F3)),"",
+  //        IF(M3="Above Avg","Under",
+  //        IF(M3="Below Avg","Over",
+  //        IF(F4<=15,"Over",
+  //        IF(K5>G5,"Over","Under")))))
+  const f2Blank = $("F2").value === "";
+  const f3Blank = $("F3").value === "";
+  let M5;
+  if(f2Blank || f3Blank){
+    M5 = "";
+  } else if(M3 === "Above Avg"){
+    M5 = "Under";
+  } else if(M3 === "Below Avg"){
+    M5 = "Over";
+  } else if(F4 <= 15){
+    M5 = "Over";
+  } else if(K5 !== null && K5 > G5){
+    M5 = "Over";
+  } else {
+    M5 = "Under";
+  }
+  $("M5").textContent = M5 === "" ? "–" : M5;
 }
 
 // wire manual inputs + K5 + J5
@@ -441,17 +481,17 @@ function applyGameData(away, home, status){
   $("H2").value = awayQ4Live;
   $("H3").value = homeQ4Live;
 
-  // F column = Q4 score snapshot captured once clock reaches <=6:00 in Q4
+  // F column = Q4 score snapshot captured once clock reaches <=5:00 in Q4
   if(period === 4 && state === "in"){
     const remaining = parseClockRemaining(status.clock);
-    if(remaining !== null && remaining <= 6 && q4Snapshot.away === null){
+    if(remaining !== null && remaining <= 5 && q4Snapshot.away === null){
       q4Snapshot.away = awayQ4Live;
       q4Snapshot.home = homeQ4Live;
     }
   }
   if(period > 4 || state === "post"){
     if(q4Snapshot.away === null){
-      // Q4 ended without us ever observing the 6-min mark; best effort fallback
+      // Q4 ended without us ever observing the 5-min mark; best effort fallback
       q4Snapshot.away = awayQ4Live;
       q4Snapshot.home = homeQ4Live;
     }
