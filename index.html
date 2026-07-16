@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Valkyries @ Fever — Live Score Sheet</title>
+<style>
+  :root{
+    --grid-line:#d0d3d8;
+    --header-bg:#eef1f4;
+    --header-fg:#3c4043;
+    --cell-bg:#ffffff;
+    --yellow:#fff3b0;
+    --pink:#f8c9c9;
+    --green:#c8e9d1;
+    --accent:#1a5cff;
+    --live-dot:#e0473a;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    padding:24px;
+    background:#f4f5f7;
+    font-family:"Segoe UI", Calibri, Arial, sans-serif;
+    color:#202124;
+  }
+  .wrap{max-width:960px;margin:0 auto;}
+  .topbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:12px;
+    margin-bottom:14px;
+  }
+  h1{
+    font-size:19px;
+    font-weight:600;
+    margin:0;
+    letter-spacing:.2px;
+  }
+  .status{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:13px;
+    color:#5f6368;
+    background:#fff;
+    border:1px solid var(--grid-line);
+    border-radius:20px;
+    padding:6px 12px;
+  }
+  .dot{
+    width:8px;height:8px;border-radius:50%;
+    background:#9aa0a6;
+  }
+  .dot.live{
+    background:var(--live-dot);
+    animation:pulse 1.4s infinite;
+  }
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(224,71,58,.5);}
+    70%{box-shadow:0 0 0 6px rgba(224,71,58,0);}
+    100%{box-shadow:0 0 0 0 rgba(224,71,58,0);}
+  }
+  .banner{
+    font-size:12.5px;
+    color:#8a5300;
+    background:#fff7e0;
+    border:1px solid #f0dca0;
+    border-radius:6px;
+    padding:8px 12px;
+    margin-bottom:14px;
+    display:none;
+  }
+  .sheet-scroll{
+    overflow-x:auto;
+    border:1px solid var(--grid-line);
+    border-radius:6px;
+    background:#fff;
+  }
+  table{
+    border-collapse:collapse;
+    width:100%;
+    font-size:13px;
+    min-width:900px;
+  }
+  th,td{
+    border:1px solid var(--grid-line);
+    padding:6px 8px;
+    text-align:center;
+    white-space:nowrap;
+  }
+  .colhead th{
+    background:var(--header-bg);
+    color:#5f6368;
+    font-weight:500;
+    font-size:11.5px;
+    height:22px;
+    padding:2px;
+  }
+  .corner{background:var(--header-bg);}
+  .rownum{
+    background:var(--header-bg);
+    color:#5f6368;
+    font-weight:500;
+    width:28px;
+  }
+  .hdr-row th{
+    background:#f7f8fa;
+    font-weight:600;
+    color:#3c4043;
+    font-size:12.5px;
+  }
+  td.team{
+    text-align:left;
+    font-weight:600;
+    background:#fafbfc;
+  }
+  td.label{
+    text-align:left;
+    font-size:11.5px;
+    color:#5f6368;
+    font-style:italic;
+    background:#fafbfc;
+  }
+  td.formula{font-weight:600;}
+  td.avg{background:var(--yellow);}
+  td.pred-total{background:var(--pink);font-weight:700;}
+  td.grand-total{background:var(--green);font-weight:700;}
+  td.blank{background:#fbfbfc;}
+  input[type=number]{
+    width:48px;
+    border:1px solid #c7cad0;
+    border-radius:3px;
+    text-align:center;
+    font-size:13px;
+    padding:3px 2px;
+    font-family:inherit;
+  }
+  input[type=number]:disabled{
+    border:none;
+    background:transparent;
+    color:#202124;
+    font-weight:600;
+  }
+  select{
+    border:1px solid #c7cad0;
+    border-radius:3px;
+    font-size:12.5px;
+    padding:3px;
+    font-family:inherit;
+  }
+  input.k5{
+    width:64px;
+  }
+  .footer{
+    margin-top:12px;
+    font-size:11.5px;
+    color:#9aa0a6;
+    display:flex;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:6px;
+  }
+  button.refresh{
+    border:1px solid var(--grid-line);
+    background:#fff;
+    border-radius:6px;
+    padding:6px 12px;
+    font-size:12.5px;
+    cursor:pointer;
+    color:#3c4043;
+  }
+  button.refresh:hover{background:#f1f3f4;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="topbar">
+    <h1>Valkyries @ Fever — Live Score Sheet</h1>
+    <div class="status" id="statusPill">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">Connecting…</span>
+    </div>
+  </div>
+
+  <div class="banner" id="banner"></div>
+
+  <div class="sheet-scroll">
+    <table>
+      <tr class="colhead">
+        <th class="corner"></th>
+        <th>A</th><th>B</th><th>C</th><th>D</th><th>E</th><th>F</th>
+        <th>G</th><th>H</th><th>I</th><th>J</th><th>K</th><th>L</th><th>M</th>
+      </tr>
+      <tr class="hdr-row">
+        <td class="rownum">1</td>
+        <td>Team</td><td>Q1</td><td>Q2</td><td>Q3</td><td>Avg Q1-3</td>
+        <td>Q4=6 min</td><td>T=42 min</td><td>Q4</td><td>Total</td>
+        <td>O/U</td><td>Odds</td><td>Diff.</td><td>Suggested Pick</td>
+      </tr>
+
+      <tr>
+        <td class="rownum">2</td>
+        <td class="team" id="awayName">—</td>
+        <td><input type="number" id="B2" disabled></td>
+        <td><input type="number" id="C2" disabled></td>
+        <td><input type="number" id="D2" disabled></td>
+        <td class="formula avg" id="E2">–</td>
+        <td><input type="number" id="F2" disabled></td>
+        <td class="formula" id="G2">–</td>
+        <td><input type="number" id="H2" disabled></td>
+        <td class="formula" id="I2">–</td>
+        <td class="blank"></td>
+        <td class="label">(Tot Q1-3)+AVG</td>
+        <td class="label">Needed to score in Q4</td>
+        <td class="blank"></td>
+      </tr>
+
+      <tr>
+        <td class="rownum">3</td>
+        <td class="team" id="homeName">—</td>
+        <td><input type="number" id="B3" disabled></td>
+        <td><input type="number" id="C3" disabled></td>
+        <td><input type="number" id="D3" disabled></td>
+        <td class="formula avg" id="E3">–</td>
+        <td><input type="number" id="F3" disabled></td>
+        <td class="formula" id="G3">–</td>
+        <td><input type="number" id="H3" disabled></td>
+        <td class="formula" id="I3">–</td>
+        <td class="blank"></td>
+        <td class="formula" id="K3">–</td>
+        <td class="formula" id="L3">–</td>
+        <td class="blank"></td>
+      </tr>
+
+      <tr>
+        <td class="rownum">4</td>
+        <td class="team">Total</td>
+        <td class="formula" id="B4">–</td>
+        <td class="formula" id="C4">–</td>
+        <td class="formula" id="D4">–</td>
+        <td class="formula avg" id="E4">–</td>
+        <td class="formula" id="F4">–</td>
+        <td class="formula" id="G4">–</td>
+        <td class="formula" id="H4">–</td>
+        <td class="blank"></td>
+        <td class="blank"></td>
+        <td class="blank"></td>
+        <td class="blank"></td>
+        <td class="blank"></td>
+      </tr>
+
+      <tr>
+        <td class="rownum">5</td>
+        <td class="team">Predicted</td>
+        <td class="formula" id="B5">–</td>
+        <td class="formula" id="C5">–</td>
+        <td class="formula" id="D5">–</td>
+        <td class="formula avg" id="E5">–</td>
+        <td class="formula" id="F5">–</td>
+        <td class="formula pred-total" id="G5">–</td>
+        <td class="blank"></td>
+        <td class="formula grand-total" id="I5">–</td>
+        <td>
+          <select id="J5">
+            <option value="">–</option>
+            <option value="Under">Under</option>
+            <option value="Over">Over</option>
+          </select>
+        </td>
+        <td><input type="number" step="0.1" class="k5" id="K5" placeholder="0.0"></td>
+        <td class="formula" id="L5">–</td>
+        <td class="formula" id="M5">–</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="footer">
+    <span id="clockInfo">Waiting for tip-off…</span>
+    <span>
+      <button class="refresh" id="refreshBtn">Refresh now</button>
+      &nbsp;Last updated: <span id="lastUpdated">—</span>
+    </span>
+  </div>
+
+</div>
+
+<script>
+function todayStr(){
+  return new Date().toDateString();
+}
+
+let liveMode = false;
+let failCount = 0;
+let q4Snapshot = { away: null, home: null }; // F column snapshot, captured once
+let lastState = null;
+
+const $ = id => document.getElementById(id);
+
+function setStatus(text, live){
+  $("statusText").textContent = text;
+  $("statusDot").classList.toggle("live", !!live);
+}
+
+function showBanner(msg){
+  const b = $("banner");
+  if(!msg){ b.style.display = "none"; return; }
+  b.style.display = "block";
+  b.textContent = msg;
+}
+
+function round0(n){ return Math.round(n); }
+
+function fmt(n, decimals){
+  if(n === null || n === undefined || isNaN(n)) return "–";
+  return decimals ? Number(n).toFixed(decimals) : String(round0(n));
+}
+
+function enableManualEntry(){
+  ["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3"].forEach(id=>{
+    const el = $(id);
+    el.disabled = false;
+    if(el.value === "") el.value = 0;
+  });
+  $("awayName").textContent = $("awayName").textContent === "—" ? "Away Team" : $("awayName").textContent;
+  $("homeName").textContent = $("homeName").textContent === "—" ? "Home Team" : $("homeName").textContent;
+  recalc();
+}
+
+function lockManualEntry(){
+  ["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3"].forEach(id=>{
+    $(id).disabled = true;
+  });
+}
+
+function parseClockRemaining(clockStr){
+  // "6:00" -> minutes remaining as float
+  if(!clockStr) return null;
+  const parts = clockStr.split(":");
+  if(parts.length !== 2) return null;
+  const m = parseFloat(parts[0]);
+  const s = parseFloat(parts[1]);
+  if(isNaN(m) || isNaN(s)) return null;
+  return m + s/60;
+}
+
+function num(v){ const n = Number(v); return isNaN(n) ? 0 : n; }
+
+function recalc(){
+  const B2=num($("B2").value), C2=num($("C2").value), D2=num($("D2").value);
+  const F2=num($("F2").value), H2=num($("H2").value);
+  const B3=num($("B3").value), C3=num($("C3").value), D3=num($("D3").value);
+  const F3=num($("F3").value), H3=num($("H3").value);
+
+  // Row 2 (Away)
+  const E2 = D2===0 ? (B2+C2)/2 : (B2+C2+D2)/3;
+  const G2 = B2+C2+D2+F2;
+  const I2 = B2+C2+D2+H2;
+  $("E2").textContent = fmt(E2);
+  $("G2").textContent = fmt(G2);
+  $("I2").textContent = fmt(I2);
+
+  // Row 3 (Home)
+  const E3 = D2===0 ? (B2+C2)/2 : (B2+C2+D2)/3; // per spec, E3 formula references row2 cells
+  const G3 = B3+C3+D3+F3;
+  const I3 = B3+C3+D3+H3;
+  $("E3").textContent = fmt(E3);
+  $("G3").textContent = fmt(G3);
+  $("I3").textContent = fmt(I3);
+
+  // Row 4 (Total)
+  const B4=B2+B3, C4=C2+C3, D4=D2+D3, F4=F2+F3, H4=H2+H3;
+  const E4 = D4===0 ? (B4+C4)/2 : (B4+C4+D4)/3;
+  const G4 = G2+G3;
+  $("B4").textContent = fmt(B4);
+  $("C4").textContent = fmt(C4);
+  $("D4").textContent = fmt(D4);
+  $("E4").textContent = fmt(E4);
+  $("F4").textContent = fmt(F4);
+  $("G4").textContent = fmt(G4);
+  $("H4").textContent = fmt(H4);
+
+  // Row 3, K3/L3 (per spec, reference the Total row: B4:D4, D4)
+  const sumQ13 = B4+C4+D4;
+  const avgQ13 = D4===0 ? (B4+C4)/2 : (B4+C4+D4)/3;
+  const avgRounded = round0(avgQ13);
+  const combined = round0(sumQ13 + avgRounded);
+  $("K3").textContent = `${round0(sumQ13)} (Avg: ${avgRounded}) = ${combined}`;
+
+  // Row 5 (Predicted)
+  const B5 = (B4/12)*48;
+  const C5 = (C4/12)*48;
+  const D5 = (D4/12)*48;
+  const E5 = (B5+C5+D5)/3;
+  const F5 = (F4/6)*48;
+  const validQtrs = [B5,C5,D5].filter(v => !isNaN(v)).length;
+  const G5 = (B5+C5+D5 + ((F4*2)/12)*48) / (validQtrs + 1);
+  const I5 = I2+I3;
+
+  $("B5").textContent = fmt(B5);
+  $("C5").textContent = fmt(C5);
+  $("D5").textContent = fmt(D5);
+  $("E5").textContent = fmt(E5);
+  $("F5").textContent = fmt(F5);
+  $("G5").textContent = fmt(G5);
+  $("I5").textContent = fmt(I5);
+
+  const K5 = $("K5").value === "" ? null : Number($("K5").value);
+  const L3 = K5 === null ? "–" : fmt(Math.abs(sumQ13 - K5), 1);
+  $("L3").textContent = L3;
+
+  const L5 = K5 === null ? "–" : fmt(Math.abs(K5 - I5), 1);
+  $("L5").textContent = L5;
+
+  const M5 = K5 === null ? "–" : (K5 > G5 ? "Under" : "Over");
+  $("M5").textContent = M5;
+}
+
+// wire manual inputs + K5 + J5
+["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3","K5"].forEach(id=>{
+  $(id).addEventListener("input", recalc);
+});
+
+function applyGameData(away, home, status){
+  $("awayName").textContent = away.name;
+  $("homeName").textContent = home.name;
+
+  $("B2").value = away.q1; $("C2").value = away.q2; $("D2").value = away.q3;
+  $("B3").value = home.q1; $("C3").value = home.q2; $("D3").value = home.q3;
+
+  const period = status.period;
+  const state = status.state; // 'pre' | 'in' | 'post'
+
+  // H column = current live Q4 score (running)
+  const awayQ4Live = period >= 4 ? away.q4 : 0;
+  const homeQ4Live = period >= 4 ? home.q4 : 0;
+  $("H2").value = awayQ4Live;
+  $("H3").value = homeQ4Live;
+
+  // F column = Q4 score snapshot captured once clock reaches <=6:00 in Q4
+  if(period === 4 && state === "in"){
+    const remaining = parseClockRemaining(status.clock);
+    if(remaining !== null && remaining <= 6 && q4Snapshot.away === null){
+      q4Snapshot.away = awayQ4Live;
+      q4Snapshot.home = homeQ4Live;
+    }
+  }
+  if(period > 4 || state === "post"){
+    if(q4Snapshot.away === null){
+      // Q4 ended without us ever observing the 6-min mark; best effort fallback
+      q4Snapshot.away = awayQ4Live;
+      q4Snapshot.home = homeQ4Live;
+    }
+  }
+  $("F2").value = q4Snapshot.away !== null ? q4Snapshot.away : 0;
+  $("F3").value = q4Snapshot.home !== null ? q4Snapshot.home : 0;
+
+  // status pill + clock line
+  if(state === "pre"){
+    setStatus(`Scheduled — ${status.detail || "tip-off soon"}`, false);
+    $("clockInfo").textContent = status.detail || "Game has not started yet.";
+  } else if(state === "in"){
+    setStatus(`Live — Q${period}`, true);
+    $("clockInfo").textContent = `Q${period} · ${status.clock || ""} remaining`;
+  } else {
+    setStatus("Final", false);
+    $("clockInfo").textContent = "Game final.";
+  }
+
+  lockManualEntry();
+  recalc();
+}
+
+function buildLookupPrompt(){
+  return `Search the web for the live score of today's WNBA game between the Golden State Valkyries and the Indiana Fever (today is ${todayStr()}). Find the current quarter-by-quarter score (points scored IN each quarter, not cumulative), the game state, current period, and time remaining in the current quarter.
+
+Respond with ONLY a raw JSON object, no markdown code fences, no commentary before or after. Match this exact shape:
+{"found":true,"state":"in","period":2,"clock":"6:15","detail":"6:15 - 2nd Quarter","away":{"name":"Golden State Valkyries","q1":22,"q2":8,"q3":0,"q4":0},"home":{"name":"Indiana Fever","q1":18,"q2":10,"q3":0,"q4":0}}
+
+Rules:
+- state is one of "pre", "in", "post"
+- period is the current quarter number (0 if the game hasn't tipped off)
+- clock is the time remaining in the current quarter as "MM:SS", or null if not in progress or final
+- q1-q4 are points scored BY EACH TEAM IN THAT SPECIFIC QUARTER ONLY (not running totals), use 0 for quarters not yet played
+- If you cannot find this specific game today, respond with exactly {"found":false}
+- Output nothing except the JSON object itself`;
+}
+
+function extractJson(text){
+  const cleaned = text.replace(/```json/gi, "").replace(/```/g, "").trim();
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if(start === -1 || end === -1) throw new Error("no JSON object found in response");
+  return JSON.parse(cleaned.slice(start, end+1));
+}
+
+async function fetchScore(){
+  try{
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 1000,
+        messages: [{ role: "user", content: buildLookupPrompt() }],
+        tools: [{ type: "web_search_20250305", name: "web_search" }]
+      })
+    });
+    if(!res.ok) throw new Error("API error " + res.status);
+    const data = await res.json();
+    const text = (data.content || [])
+      .map(block => block.type === "text" ? block.text : "")
+      .filter(Boolean)
+      .join("\n");
+    const parsed = extractJson(text);
+
+    if(!parsed.found){
+      failCount++;
+      setStatus("Game not found yet", false);
+      showBanner("Couldn't find the Valkyries vs. Fever game yet. Retrying automatically — you can also enter scores manually below.");
+      if(failCount >= 2) enableManualEntry();
+      return;
+    }
+
+    showBanner(null);
+    liveMode = true;
+    failCount = 0;
+
+    const status = {
+      period: parsed.period || 0,
+      clock: parsed.clock || null,
+      state: parsed.state || "pre",
+      detail: parsed.detail || null
+    };
+
+    applyGameData(parsed.away, parsed.home, status);
+    $("lastUpdated").textContent = new Date().toLocaleTimeString();
+
+  } catch(err){
+    failCount++;
+    console.error("Score fetch failed:", err);
+    if(!liveMode){
+      setStatus("Live fetch unavailable", false);
+      showBanner("Live score lookup failed. You can enter each quarter's score manually below and the sheet will still calculate everything live.");
+      if(failCount >= 2) enableManualEntry();
+    }
+  }
+}
+
+$("refreshBtn").addEventListener("click", fetchScore);
+$("J5").addEventListener("change", recalc);
+
+fetchScore();
+setInterval(fetchScore, 45000);
+recalc();
+</script>
+</body>
+</html>
