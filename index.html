@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Valkyries @ Fever — Live Score Sheet</title>
+<title>WNBA Live Scores — Score Sheet</title>
 <style>
   :root{
     --grid-line:#d0d3d8;
@@ -24,7 +24,7 @@
     font-family:"Segoe UI", Calibri, Arial, sans-serif;
     color:#202124;
   }
-  .wrap{max-width:960px;margin:0 auto;}
+  .wrap{max-width:1000px;margin:0 auto;}
   .topbar{
     display:flex;
     align-items:center;
@@ -129,6 +129,20 @@
   td.pred-total{background:var(--pink);font-weight:700;}
   td.grand-total{background:var(--green);font-weight:700;}
   td.blank{background:#fbfbfc;}
+  td.matchup-label{
+    text-align:left;
+    font-weight:600;
+    font-size:12.5px;
+    background:#f0f3ff;
+    color:#26324a;
+  }
+  tr.spacer-row td{
+    background:#f4f5f7;
+    border-left:none;
+    border-right:none;
+    height:10px;
+    padding:2px;
+  }
   input[type=number]{
     width:48px;
     border:1px solid #c7cad0;
@@ -179,7 +193,7 @@
 <div class="wrap">
 
   <div class="topbar">
-    <h1>Valkyries @ Fever — Live Score Sheet</h1>
+    <h1>WNBA Live Scores — Score Sheet</h1>
     <div class="status" id="statusPill">
       <span class="dot" id="statusDot"></span>
       <span id="statusText">Connecting…</span>
@@ -201,85 +215,12 @@
         <td>Q4=5 min</td><td>T=35 min</td><td>Q4</td><td>Total</td>
         <td>O/U</td><td>Odds</td><td>Diff.</td><td>Suggested Pick</td>
       </tr>
-
-      <tr>
-        <td class="rownum">2</td>
-        <td class="team" id="awayName">—</td>
-        <td><input type="number" id="B2" disabled></td>
-        <td><input type="number" id="C2" disabled></td>
-        <td><input type="number" id="D2" disabled></td>
-        <td class="formula avg" id="E2">–</td>
-        <td><input type="number" id="F2" disabled></td>
-        <td class="formula" id="G2">–</td>
-        <td><input type="number" id="H2" disabled></td>
-        <td class="formula" id="I2">–</td>
-        <td class="blank"></td>
-        <td class="label">(Tot Q1-3)+AVG</td>
-        <td class="label">Needed to score in Q4</td>
-        <td class="blank"></td>
-      </tr>
-
-      <tr>
-        <td class="rownum">3</td>
-        <td class="team" id="homeName">—</td>
-        <td><input type="number" id="B3" disabled></td>
-        <td><input type="number" id="C3" disabled></td>
-        <td><input type="number" id="D3" disabled></td>
-        <td class="formula avg" id="E3">–</td>
-        <td><input type="number" id="F3" disabled></td>
-        <td class="formula" id="G3">–</td>
-        <td><input type="number" id="H3" disabled></td>
-        <td class="formula" id="I3">–</td>
-        <td class="blank"></td>
-        <td class="formula" id="K3">–</td>
-        <td class="formula" id="L3">–</td>
-        <td class="formula" id="M3">–</td>
-      </tr>
-
-      <tr>
-        <td class="rownum">4</td>
-        <td class="team">Total</td>
-        <td class="formula" id="B4">–</td>
-        <td class="formula" id="C4">–</td>
-        <td class="formula" id="D4">–</td>
-        <td class="formula avg" id="E4">–</td>
-        <td class="formula" id="F4">–</td>
-        <td class="formula" id="G4">–</td>
-        <td class="formula" id="H4">–</td>
-        <td class="blank"></td>
-        <td class="blank"></td>
-        <td class="blank"></td>
-        <td class="blank"></td>
-        <td class="blank"></td>
-      </tr>
-
-      <tr>
-        <td class="rownum">5</td>
-        <td class="team">Predicted</td>
-        <td class="formula" id="B5">–</td>
-        <td class="formula" id="C5">–</td>
-        <td class="formula" id="D5">–</td>
-        <td class="formula avg" id="E5">–</td>
-        <td class="formula" id="F5">–</td>
-        <td class="formula pred-total" id="G5">–</td>
-        <td class="blank"></td>
-        <td class="formula grand-total" id="I5">–</td>
-        <td>
-          <select id="J5">
-            <option value="">–</option>
-            <option value="Under">Under</option>
-            <option value="Over">Over</option>
-          </select>
-        </td>
-        <td><input type="number" step="0.1" class="k5" id="K5" placeholder="0.0"></td>
-        <td class="formula" id="L5">–</td>
-        <td class="formula" id="M5">–</td>
-      </tr>
+      <tbody id="gamesBody"></tbody>
     </table>
   </div>
 
   <div class="footer">
-    <span id="clockInfo">Waiting for tip-off…</span>
+    <span id="clockInfo">Auto-refreshing every 5s</span>
     <span>
       <button class="refresh" id="refreshBtn">Refresh now</button>
       &nbsp;Last updated: <span id="lastUpdated">—</span>
@@ -290,18 +231,15 @@
 </div>
 
 <script>
-function todayStr(){
-  return new Date().toDateString();
-}
+const $ = id => document.getElementById(id);
+const eg = (gid, suffix) => document.getElementById(`${gid}-${suffix}`);
 
 let liveMode = false;
 let failCount = 0;
-let q4Snapshot = { away: null, home: null }; // F column snapshot, captured once
-let lastState = null;
+let gameState = {};       // gid -> { q4Snapshot: {away, home} }
+let rowCounter = { n: 2 }; // continues across every game block, spreadsheet-style
 
-const $ = id => document.getElementById(id);
-
-function setStatus(text, live){
+function setGlobalStatus(text, live){
   $("statusText").textContent = text;
   $("statusDot").classList.toggle("live", !!live);
 }
@@ -313,37 +251,18 @@ function showBanner(msg){
   b.textContent = msg;
 }
 
+function num(v){ const n = Number(v); return isNaN(n) ? 0 : n; }
 function round0(n){ return Math.round(n); }
-
 function round0AvgB4D4(B4, C4, D4){
-  const avg = (B4 + C4 + D4) / 3; // AVERAGE(B4:D4)
-  return Math.round(avg * 10) / 10; // ROUND(...,1)
+  const avg = (B4 + C4 + D4) / 3;
+  return Math.round(avg * 10) / 10;
 }
-
 function fmt(n, decimals){
   if(n === null || n === undefined || isNaN(n)) return "–";
   return decimals ? Number(n).toFixed(decimals) : String(round0(n));
 }
 
-function enableManualEntry(){
-  ["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3"].forEach(id=>{
-    const el = $(id);
-    el.disabled = false;
-    if(el.value === "") el.value = 0;
-  });
-  $("awayName").textContent = $("awayName").textContent === "—" ? "Away Team" : $("awayName").textContent;
-  $("homeName").textContent = $("homeName").textContent === "—" ? "Home Team" : $("homeName").textContent;
-  recalc();
-}
-
-function lockManualEntry(){
-  ["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3"].forEach(id=>{
-    $(id).disabled = true;
-  });
-}
-
 function parseClockRemaining(clockStr){
-  // "6:00" -> minutes remaining as float
   if(!clockStr) return null;
   const parts = clockStr.split(":");
   if(parts.length !== 2) return null;
@@ -353,50 +272,152 @@ function parseClockRemaining(clockStr){
   return m + s/60;
 }
 
-function num(v){ const n = Number(v); return isNaN(n) ? 0 : n; }
+function makeGameRowsHtml(gid){
+  const r2 = rowCounter.n++;
+  const r3 = rowCounter.n++;
+  const r4 = rowCounter.n++;
+  const r5 = rowCounter.n++;
+  return `
+    <tr>
+      <td class="rownum"></td>
+      <td colspan="13" class="matchup-label" id="${gid}-matchup">—</td>
+    </tr>
+    <tr>
+      <td class="rownum">${r2}</td>
+      <td class="team" id="${gid}-awayName">—</td>
+      <td><input type="number" id="${gid}-B2" disabled></td>
+      <td><input type="number" id="${gid}-C2" disabled></td>
+      <td><input type="number" id="${gid}-D2" disabled></td>
+      <td class="formula avg" id="${gid}-E2">–</td>
+      <td><input type="number" id="${gid}-F2" disabled></td>
+      <td class="formula" id="${gid}-G2">–</td>
+      <td><input type="number" id="${gid}-H2" disabled></td>
+      <td class="formula" id="${gid}-I2">–</td>
+      <td class="blank"></td>
+      <td class="label">(Tot Q1-3)+AVG</td>
+      <td class="label">Needed to score in Q4</td>
+      <td class="blank"></td>
+    </tr>
+    <tr>
+      <td class="rownum">${r3}</td>
+      <td class="team" id="${gid}-homeName">—</td>
+      <td><input type="number" id="${gid}-B3" disabled></td>
+      <td><input type="number" id="${gid}-C3" disabled></td>
+      <td><input type="number" id="${gid}-D3" disabled></td>
+      <td class="formula avg" id="${gid}-E3">–</td>
+      <td><input type="number" id="${gid}-F3" disabled></td>
+      <td class="formula" id="${gid}-G3">–</td>
+      <td><input type="number" id="${gid}-H3" disabled></td>
+      <td class="formula" id="${gid}-I3">–</td>
+      <td class="blank"></td>
+      <td class="formula" id="${gid}-K3">–</td>
+      <td class="formula" id="${gid}-L3">–</td>
+      <td class="formula" id="${gid}-M3">–</td>
+    </tr>
+    <tr>
+      <td class="rownum">${r4}</td>
+      <td class="team">Total</td>
+      <td class="formula" id="${gid}-B4">–</td>
+      <td class="formula" id="${gid}-C4">–</td>
+      <td class="formula" id="${gid}-D4">–</td>
+      <td class="formula avg" id="${gid}-E4">–</td>
+      <td class="formula" id="${gid}-F4">–</td>
+      <td class="formula" id="${gid}-G4">–</td>
+      <td class="formula" id="${gid}-H4">–</td>
+      <td class="blank"></td><td class="blank"></td><td class="blank"></td><td class="blank"></td><td class="blank"></td>
+    </tr>
+    <tr>
+      <td class="rownum">${r5}</td>
+      <td class="team">Predicted</td>
+      <td class="formula" id="${gid}-B5">–</td>
+      <td class="formula" id="${gid}-C5">–</td>
+      <td class="formula" id="${gid}-D5">–</td>
+      <td class="formula avg" id="${gid}-E5">–</td>
+      <td class="formula" id="${gid}-F5">–</td>
+      <td class="formula pred-total" id="${gid}-G5">–</td>
+      <td class="blank"></td>
+      <td class="formula grand-total" id="${gid}-I5">–</td>
+      <td>
+        <select id="${gid}-J5">
+          <option value="">–</option>
+          <option value="Under">Under</option>
+          <option value="Over">Over</option>
+        </select>
+      </td>
+      <td><input type="number" step="0.1" class="k5" id="${gid}-K5" placeholder="0.0"></td>
+      <td class="formula" id="${gid}-L5">–</td>
+      <td class="formula" id="${gid}-M5">–</td>
+    </tr>
+    <tr class="spacer-row"><td colspan="14"></td></tr>
+  `;
+}
 
-function recalc(){
-  const B2=num($("B2").value), C2=num($("C2").value), D2=num($("D2").value);
-  const F2=num($("F2").value), H2=num($("H2").value);
-  const B3=num($("B3").value), C3=num($("C3").value), D3=num($("D3").value);
-  const F3=num($("F3").value), H3=num($("H3").value);
+function ensureGameBlock(gid){
+  if(gameState[gid]) return;
+  gameState[gid] = { q4Snapshot: { away: null, home: null } };
+  $("gamesBody").insertAdjacentHTML("beforeend", makeGameRowsHtml(gid));
+  ["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3","K5"].forEach(suffix=>{
+    eg(gid, suffix).addEventListener("input", ()=>recalcGame(gid));
+  });
+  eg(gid, "J5").addEventListener("change", ()=>recalcGame(gid));
+}
+
+function enableManualFallbackBlock(){
+  if(gameState["manual"]) return;
+  ensureGameBlock("manual");
+  ["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3"].forEach(suffix=>{
+    const elx = eg("manual", suffix);
+    elx.disabled = false;
+    if(elx.value === "") elx.value = 0;
+  });
+  eg("manual","awayName").textContent = "Away Team";
+  eg("manual","homeName").textContent = "Home Team";
+  eg("manual","matchup").textContent = "Manual entry — live lookup unavailable";
+  recalcGame("manual");
+}
+
+function recalcGame(gid){
+  const B2=num(eg(gid,"B2").value), C2=num(eg(gid,"C2").value), D2=num(eg(gid,"D2").value);
+  const F2=num(eg(gid,"F2").value), H2=num(eg(gid,"H2").value);
+  const B3=num(eg(gid,"B3").value), C3=num(eg(gid,"C3").value), D3=num(eg(gid,"D3").value);
+  const F3=num(eg(gid,"F3").value), H3=num(eg(gid,"H3").value);
 
   // Row 2 (Away)
   const E2 = D2===0 ? (B2+C2)/2 : (B2+C2+D2)/3;
   const G2 = B2+C2+D2+F2;
   const I2 = B2+C2+D2+H2;
-  $("E2").textContent = fmt(E2);
-  $("G2").textContent = fmt(G2);
-  $("I2").textContent = fmt(I2);
+  eg(gid,"E2").textContent = fmt(E2);
+  eg(gid,"G2").textContent = fmt(G2);
+  eg(gid,"I2").textContent = fmt(I2);
 
-  // Row 3 (Home)
-  const E3 = D2===0 ? (B2+C2)/2 : (B2+C2+D2)/3; // per spec, E3 formula references row2 cells
+  // Row 3 (Home) — E3 formula references row2 cells per spec
+  const E3 = D2===0 ? (B2+C2)/2 : (B2+C2+D2)/3;
   const G3 = B3+C3+D3+F3;
   const I3 = B3+C3+D3+H3;
-  $("E3").textContent = fmt(E3);
-  $("G3").textContent = fmt(G3);
-  $("I3").textContent = fmt(I3);
+  eg(gid,"E3").textContent = fmt(E3);
+  eg(gid,"G3").textContent = fmt(G3);
+  eg(gid,"I3").textContent = fmt(I3);
 
   // Row 4 (Total)
   const B4=B2+B3, C4=C2+C3, D4=D2+D3, F4=F2+F3, H4=H2+H3;
   const E4 = D4===0 ? (B4+C4)/2 : (B4+C4+D4)/3;
   const G4 = G2+G3;
-  $("B4").textContent = fmt(B4);
-  $("C4").textContent = fmt(C4);
-  $("D4").textContent = fmt(D4);
-  $("E4").textContent = fmt(E4);
-  $("F4").textContent = fmt(F4);
-  $("G4").textContent = fmt(G4);
-  $("H4").textContent = fmt(H4);
+  eg(gid,"B4").textContent = fmt(B4);
+  eg(gid,"C4").textContent = fmt(C4);
+  eg(gid,"D4").textContent = fmt(D4);
+  eg(gid,"E4").textContent = fmt(E4);
+  eg(gid,"F4").textContent = fmt(F4);
+  eg(gid,"G4").textContent = fmt(G4);
+  eg(gid,"H4").textContent = fmt(H4);
 
-  // Row 3, K3/L3 (per spec, reference the Total row: B4:D4, D4)
+  // K3/L3 reference the Total row
   const sumQ13 = B4+C4+D4;
   const avgQ13 = D4===0 ? (B4+C4)/2 : (B4+C4+D4)/3;
   const avgRounded = round0(avgQ13);
   const combined = round0(sumQ13 + avgRounded);
-  $("K3").textContent = `${round0(sumQ13)} (Avg: ${avgRounded}) = ${combined}`;
+  eg(gid,"K3").textContent = `${round0(sumQ13)} (Avg: ${avgRounded}) = ${combined}`;
 
-  // Row 5 (Predicted) — Q4 window is 5 min, full-game basis is 40 min (spec: T=35 min header, 40 min in formulas)
+  // Row 5 (Predicted) — Q4 window is 5 min, full-game basis is 40 min
   const B5 = (B4/10)*40;
   const C5 = (C4/10)*40;
   const D5 = (D4/10)*40;
@@ -406,18 +427,15 @@ function recalc(){
   const G5 = (B5+C5+D5 + ((F4*2)/10)*40) / (validQtrs + 1);
   const I5 = I2+I3;
 
-  $("B5").textContent = fmt(B5);
-  $("C5").textContent = fmt(C5);
-  $("D5").textContent = fmt(D5);
-  $("E5").textContent = fmt(E5);
-  $("F5").textContent = fmt(F5);
-  $("G5").textContent = fmt(G5);
-  $("I5").textContent = fmt(I5);
+  eg(gid,"B5").textContent = fmt(B5);
+  eg(gid,"C5").textContent = fmt(C5);
+  eg(gid,"D5").textContent = fmt(D5);
+  eg(gid,"E5").textContent = fmt(E5);
+  eg(gid,"F5").textContent = fmt(F5);
+  eg(gid,"G5").textContent = fmt(G5);
+  eg(gid,"I5").textContent = fmt(I5);
 
-  // M3 = IF(F4=0,"", IF(F4>=23, IF(ROUND(AVERAGE(B4:D4),1)>(F4*2),"Below Avg","Above Avg"),
-  //                              IF(ROUND(AVERAGE(B4:D4),1)>(F4*2),"Below Avg","Above Avg")))
-  // (both branches of the F4>=23 check are identical, so this simplifies to the inner IF,
-  //  but implemented as written for fidelity)
+  // M3
   const avgB4D4 = round0AvgB4D4(B4, C4, D4);
   let M3;
   if(F4 === 0){
@@ -427,22 +445,18 @@ function recalc(){
   } else {
     M3 = (avgB4D4 > (F4*2)) ? "Below Avg" : "Above Avg";
   }
-  $("M3").textContent = M3 === "" ? "–" : M3;
+  eg(gid,"M3").textContent = M3 === "" ? "–" : M3;
 
-  const K5 = $("K5").value === "" ? null : Number($("K5").value);
+  const K5 = eg(gid,"K5").value === "" ? null : Number(eg(gid,"K5").value);
   const L3 = K5 === null ? "–" : fmt(Math.abs(sumQ13 - K5), 1);
-  $("L3").textContent = L3;
+  eg(gid,"L3").textContent = L3;
 
   const L5 = K5 === null ? "–" : fmt(Math.abs(K5 - I5), 1);
-  $("L5").textContent = L5;
+  eg(gid,"L5").textContent = L5;
 
-  // M5 = IF(OR(ISBLANK(F2),ISBLANK(F3)),"",
-  //        IF(M3="Above Avg","Under",
-  //        IF(M3="Below Avg","Over",
-  //        IF(F4<=15,"Over",
-  //        IF(K5>G5,"Over","Under")))))
-  const f2Blank = $("F2").value === "";
-  const f3Blank = $("F3").value === "";
+  // M5
+  const f2Blank = eg(gid,"F2").value === "";
+  const f3Blank = eg(gid,"F3").value === "";
   let M5;
   if(f2Blank || f3Blank){
     M5 = "";
@@ -457,75 +471,65 @@ function recalc(){
   } else {
     M5 = "Under";
   }
-  $("M5").textContent = M5 === "" ? "–" : M5;
+  eg(gid,"M5").textContent = M5 === "" ? "–" : M5;
 }
 
-// wire manual inputs + K5 + J5
-["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3","K5"].forEach(id=>{
-  $(id).addEventListener("input", recalc);
-});
+function applyGameData(gid, away, home, status){
+  ensureGameBlock(gid);
+  const st = gameState[gid];
 
-function applyGameData(away, home, status){
-  $("awayName").textContent = away.name;
-  $("homeName").textContent = home.name;
+  eg(gid,"awayName").textContent = away.name;
+  eg(gid,"homeName").textContent = home.name;
 
-  $("B2").value = away.q1; $("C2").value = away.q2; $("D2").value = away.q3;
-  $("B3").value = home.q1; $("C3").value = home.q2; $("D3").value = home.q3;
+  eg(gid,"B2").value = away.q1; eg(gid,"C2").value = away.q2; eg(gid,"D2").value = away.q3;
+  eg(gid,"B3").value = home.q1; eg(gid,"C3").value = home.q2; eg(gid,"D3").value = home.q3;
 
   const period = status.period;
   const state = status.state; // 'pre' | 'in' | 'post'
 
-  // H column = current live Q4 score (running)
   const awayQ4Live = period >= 4 ? away.q4 : 0;
   const homeQ4Live = period >= 4 ? home.q4 : 0;
-  $("H2").value = awayQ4Live;
-  $("H3").value = homeQ4Live;
+  eg(gid,"H2").value = awayQ4Live;
+  eg(gid,"H3").value = homeQ4Live;
 
   // F column = Q4 score snapshot captured once clock reaches <=5:00 in Q4
   if(period === 4 && state === "in"){
     const remaining = parseClockRemaining(status.clock);
-    if(remaining !== null && remaining <= 5 && q4Snapshot.away === null){
-      q4Snapshot.away = awayQ4Live;
-      q4Snapshot.home = homeQ4Live;
+    if(remaining !== null && remaining <= 5 && st.q4Snapshot.away === null){
+      st.q4Snapshot.away = awayQ4Live;
+      st.q4Snapshot.home = homeQ4Live;
     }
   }
   if(period > 4 || state === "post"){
-    if(q4Snapshot.away === null){
-      // Q4 ended without us ever observing the 5-min mark; best effort fallback
-      q4Snapshot.away = awayQ4Live;
-      q4Snapshot.home = homeQ4Live;
+    if(st.q4Snapshot.away === null){
+      st.q4Snapshot.away = awayQ4Live;
+      st.q4Snapshot.home = homeQ4Live;
     }
   }
-  $("F2").value = q4Snapshot.away !== null ? q4Snapshot.away : 0;
-  $("F3").value = q4Snapshot.home !== null ? q4Snapshot.home : 0;
+  eg(gid,"F2").value = st.q4Snapshot.away !== null ? st.q4Snapshot.away : 0;
+  eg(gid,"F3").value = st.q4Snapshot.home !== null ? st.q4Snapshot.home : 0;
 
-  // status pill + clock line
+  // matchup/status label
+  let statusText;
   if(state === "pre"){
-    setStatus(`Scheduled — ${status.detail || "tip-off soon"}`, false);
-    $("clockInfo").textContent = status.detail || "Game has not started yet.";
+    statusText = status.detail || "Scheduled";
   } else if(state === "in"){
-    setStatus(`Live — Q${period}`, true);
-    $("clockInfo").textContent = `Q${period} · ${status.clock || ""} remaining`;
+    statusText = `Q${period} · ${status.clock || ""} remaining`;
   } else {
-    setStatus("Final", false);
-    $("clockInfo").textContent = "Game final.";
+    statusText = "Final";
   }
+  eg(gid,"matchup").textContent = `${away.name} @ ${home.name} — ${statusText}`;
 
-  lockManualEntry();
-  recalc();
+  recalcGame(gid);
 }
 
 const SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/scoreboard";
 
-// Try several public CORS proxies in order, since any one of them can be
-// down or rate-limited at a given moment. Each entry returns a fetchable
-// URL for a given target, and all of them pass the JSON straight through
-// (no wrapper object to unwrap).
 const PROXIES = [
   url => "https://corsproxy.io/?url=" + encodeURIComponent(url),
   url => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
   url => "https://thingproxy.freeboard.io/fetch/" + url,
-  url => url // last resort: try the direct request in case CORS isn't actually blocking here
+  url => url
 ];
 
 function ymd(d){
@@ -535,20 +539,18 @@ function ymd(d){
   return `${y}${m}${day}`;
 }
 
-// ESPN's scoreboard endpoint defaults to "today" only. Widen the window
-// a few days either side so the target game is found even if it fell
-// on a different date than the viewer's local "today".
+// Plain default endpoint (ESPN's "today") is primary since we want tonight's
+// games specifically; the narrow ±1 day window is only a timezone-mismatch fallback.
 function targetUrls(){
   const today = new Date();
-  const start = new Date(today); start.setDate(start.getDate() - 3);
-  const end = new Date(today); end.setDate(end.getDate() + 3);
+  const start = new Date(today); start.setDate(start.getDate() - 1);
+  const end = new Date(today); end.setDate(end.getDate() + 1);
   return [
-    `${SCOREBOARD_URL}?dates=${ymd(start)}-${ymd(end)}`,
-    SCOREBOARD_URL // plain fallback, matches ESPN's default "today" behavior
+    SCOREBOARD_URL,
+    `${SCOREBOARD_URL}?dates=${ymd(start)}-${ymd(end)}`
   ];
 }
 
-// Full attempt list: every target URL through every proxy, in order.
 function scoreboardUrls(){
   const attempts = [];
   for(const target of targetUrls()){
@@ -564,18 +566,6 @@ function shortUrl(url){
   if(url.includes("allorigins")) return "allorigins.win";
   if(url.includes("thingproxy")) return "thingproxy";
   return "direct";
-}
-
-function findTargetEvent(events){
-  const isValkyries = t => /valkyries/i.test(t.displayName || t.name || "");
-  const isFever = t => /fever/i.test(t.displayName || t.name || "");
-  for(const ev of (events || [])){
-    const comp = (ev.competitions || [])[0];
-    if(!comp) continue;
-    const teams = (comp.competitors || []).map(c => c.team || {});
-    if(teams.some(isValkyries) && teams.some(isFever)) return ev;
-  }
-  return null;
 }
 
 function quarterPoints(linescores, period){
@@ -600,21 +590,23 @@ function parseEvent(ev){
 
   const statusBlock = comp.status || ev.status || {};
   const type = statusBlock.type || {};
-  const state = type.state || "pre"; // 'pre' | 'in' | 'post'
+  const state = type.state || "pre";
   const period = statusBlock.period || 0;
   const clock = state === "in" ? (statusBlock.displayClock || null) : null;
   const detail = type.detail || type.shortDetail || null;
 
   return {
+    id: ev.id,
+    date: ev.date,
     away: toTeam(awayC),
     home: toTeam(homeC),
     status: { period, clock, state, detail }
   };
 }
 
-async function fetchScore(){
+async function fetchScores(){
   try{
-    let ev = null;
+    let events = null;
     let lastErr = null;
     const attemptLog = [];
     for(const url of scoreboardUrls()){
@@ -625,9 +617,9 @@ async function fetchScore(){
           throw new Error("API error " + res.status);
         }
         const data = await res.json();
-        ev = findTargetEvent(data.events || []);
-        attemptLog.push(`${shortUrl(url)} → OK, ${(data.events||[]).length} events${ev ? ", match found" : ""}`);
-        if(ev) break;
+        events = data.events || [];
+        attemptLog.push(`${shortUrl(url)} → OK, ${events.length} events`);
+        break;
       } catch(e){
         attemptLog.push(`${shortUrl(url)} → FAILED: ${e.message || e}`);
         lastErr = e;
@@ -635,42 +627,48 @@ async function fetchScore(){
     }
     $("debugLog").textContent = attemptLog.join("  |  ");
 
-    if(!ev && lastErr) throw lastErr;
+    if(events === null) throw (lastErr || new Error("no successful fetch"));
 
-    if(!ev){
+    const parsedList = events.map(parseEvent).sort((a,b)=> new Date(a.date) - new Date(b.date));
+
+    if(parsedList.length === 0){
+      setGlobalStatus("No games found", false);
+      showBanner("No WNBA games found for today's date window yet. Retrying automatically — you can also enter scores manually below.");
       failCount++;
-      setStatus("Game not found yet", false);
-      showBanner("Couldn't find the Valkyries vs. Fever game on ESPN's scoreboard yet. Retrying automatically — you can also enter scores manually below.");
-      if(failCount >= 2) enableManualEntry();
+      if(failCount >= 2 && Object.keys(gameState).length === 0) enableManualFallbackBlock();
       return;
     }
-
-    const parsed = parseEvent(ev);
 
     showBanner(null);
     liveMode = true;
     failCount = 0;
 
-    applyGameData(parsed.away, parsed.home, parsed.status);
+    const liveCount = parsedList.filter(g => g.status.state === "in").length;
+    setGlobalStatus(`${parsedList.length} game${parsedList.length>1?"s":""} found — ${liveCount} live`, liveCount > 0);
+
+    for(const g of parsedList){
+      applyGameData("g" + g.id, g.away, g.home, g.status);
+    }
+
     $("lastUpdated").textContent = new Date().toLocaleTimeString();
 
   } catch(err){
     failCount++;
     console.error("Score fetch failed:", err);
-    if(!liveMode){
-      setStatus("Live fetch unavailable", false);
-      showBanner("Live score lookup failed. See attempt log below for details. You can enter each quarter's score manually below and the sheet will still calculate everything live.");
-      if(failCount >= 2) enableManualEntry();
+    if(!liveMode && Object.keys(gameState).length === 0){
+      setGlobalStatus("Live fetch unavailable", false);
+      showBanner("Live score lookup failed. See attempt log below for details. You can enter scores manually below.");
+      if(failCount >= 2) enableManualFallbackBlock();
+    } else {
+      showBanner("Refresh failed — showing last known data. Will retry automatically.");
     }
   }
 }
 
-$("refreshBtn").addEventListener("click", fetchScore);
-$("J5").addEventListener("change", recalc);
+$("refreshBtn").addEventListener("click", fetchScores);
 
-fetchScore();
-setInterval(fetchScore, 5000);
-recalc();
+fetchScores();
+setInterval(fetchScores, 5000);
 </script>
 </body>
 </html>
