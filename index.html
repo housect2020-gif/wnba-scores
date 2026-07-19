@@ -24,7 +24,7 @@
     font-family:"Segoe UI", Calibri, Arial, sans-serif;
     color:#202124;
   }
-  .wrap{max-width:1000px;margin:0 auto;}
+  .wrap{max-width:1180px;margin:0 auto;}
   .topbar{
     display:flex;
     align-items:center;
@@ -82,21 +82,23 @@
   table{
     border-collapse:collapse;
     width:100%;
-    font-size:13px;
-    min-width:900px;
+    table-layout:fixed;
+    font-size:11.5px;
   }
   th,td{
     border:1px solid var(--grid-line);
-    padding:6px 8px;
+    padding:4px 3px;
     text-align:center;
-    white-space:nowrap;
+    white-space:normal;
+    word-break:break-word;
+    overflow-wrap:break-word;
   }
   .colhead th{
     background:var(--header-bg);
     color:#5f6368;
     font-weight:500;
-    font-size:11.5px;
-    height:22px;
+    font-size:10px;
+    height:18px;
     padding:2px;
   }
   .corner{background:var(--header-bg);}
@@ -104,22 +106,23 @@
     background:var(--header-bg);
     color:#5f6368;
     font-weight:500;
-    width:28px;
+    width:20px;
   }
   .hdr-row th{
     background:#f7f8fa;
     font-weight:600;
     color:#3c4043;
-    font-size:12.5px;
+    font-size:10.5px;
   }
   td.team{
-    text-align:left;
+    text-align:center;
     font-weight:600;
     background:#fafbfc;
+    font-size:11px;
   }
   td.label{
-    text-align:left;
-    font-size:11.5px;
+    text-align:center;
+    font-size:10px;
     color:#5f6368;
     font-style:italic;
     background:#fafbfc;
@@ -130,9 +133,9 @@
   td.grand-total{background:var(--green);font-weight:700;}
   td.blank{background:#fbfbfc;}
   td.matchup-label{
-    text-align:left;
+    text-align:center;
     font-weight:600;
-    font-size:12.5px;
+    font-size:11px;
     background:#f0f3ff;
     color:#26324a;
   }
@@ -144,12 +147,13 @@
     padding:2px;
   }
   input[type=number]{
-    width:48px;
+    width:100%;
+    max-width:38px;
     border:1px solid #c7cad0;
     border-radius:3px;
     text-align:center;
-    font-size:13px;
-    padding:3px 2px;
+    font-size:11px;
+    padding:2px 1px;
     font-family:inherit;
   }
   input[type=number]:disabled{
@@ -161,12 +165,14 @@
   select{
     border:1px solid #c7cad0;
     border-radius:3px;
-    font-size:12.5px;
-    padding:3px;
+    font-size:10.5px;
+    padding:2px;
     font-family:inherit;
+    width:100%;
+    max-width:52px;
   }
   input.k5{
-    width:64px;
+    max-width:48px;
   }
   .footer{
     margin-top:12px;
@@ -204,6 +210,22 @@
 
   <div class="sheet-scroll">
     <table>
+      <colgroup>
+        <col style="width:2.5%">  <!-- rownum -->
+        <col style="width:18%">  <!-- Team -->
+        <col style="width:5%">   <!-- Q1 -->
+        <col style="width:5%">   <!-- Q2 -->
+        <col style="width:5%">   <!-- Q3 -->
+        <col style="width:8%">   <!-- Avg Q1-3 -->
+        <col style="width:6%">   <!-- Q4=5 min -->
+        <col style="width:7%">   <!-- T=35 min -->
+        <col style="width:5%">   <!-- Q4 -->
+        <col style="width:6%">   <!-- Total -->
+        <col style="width:6%">   <!-- O/U -->
+        <col style="width:7%">   <!-- Odds -->
+        <col style="width:6%">   <!-- Diff. -->
+        <col style="width:13.5%"><!-- Suggested Pick -->
+      </colgroup>
       <tr class="colhead">
         <th class="corner"></th>
         <th>A</th><th>B</th><th>C</th><th>D</th><th>E</th><th>F</th>
