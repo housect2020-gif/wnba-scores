@@ -563,13 +563,16 @@ function ymd(d){
 
 // Plain default endpoint (ESPN's "today") is primary since we want tonight's
 // games specifically; the narrow ±1 day window is only a timezone-mismatch fallback.
+// A cache-busting timestamp is appended so proxies (many of which cache by
+// exact URL) and the browser can't serve back a stale response.
 function targetUrls(){
   const today = new Date();
   const start = new Date(today); start.setDate(start.getDate() - 1);
   const end = new Date(today); end.setDate(end.getDate() + 1);
+  const bust = `_=${Date.now()}`;
   return [
-    SCOREBOARD_URL,
-    `${SCOREBOARD_URL}?dates=${ymd(start)}-${ymd(end)}`
+    `${SCOREBOARD_URL}?${bust}`,
+    `${SCOREBOARD_URL}?dates=${ymd(start)}-${ymd(end)}&${bust}`
   ];
 }
 
@@ -633,7 +636,7 @@ async function fetchScores(){
     const attemptLog = [];
     for(const url of scoreboardUrls()){
       try{
-        const res = await fetch(url);
+        const res = await fetch(url, { cache: "no-store" });
         if(!res.ok){
           attemptLog.push(`${shortUrl(url)} → HTTP ${res.status}`);
           throw new Error("API error " + res.status);
@@ -666,13 +669,23 @@ async function fetchScores(){
     failCount = 0;
 
     const liveCount = parsedList.filter(g => g.status.state === "in").length;
-    setGlobalStatus(`${parsedList.length} game${parsedList.length>1?"s":""} found — ${liveCount} live`, liveCount > 0);
+    const allFinal = parsedList.every(g => g.status.state === "post");
 
     for(const g of parsedList){
       applyGameData("g" + g.id, g.away, g.home, g.status);
     }
 
     $("lastUpdated").textContent = new Date().toLocaleTimeString();
+
+    if(allFinal){
+      stopAutoRefresh();
+      setGlobalStatus(`${parsedList.length} game${parsedList.length>1?"s":""} — all final`, false);
+      $("clockInfo").textContent = "All games final — auto-refresh stopped";
+    } else {
+      setGlobalStatus(`${parsedList.length} game${parsedList.length>1?"s":""} found — ${liveCount} live`, liveCount > 0);
+      $("clockInfo").textContent = "Auto-refreshing every 5s";
+      startAutoRefresh();
+    }
 
   } catch(err){
     failCount++;
@@ -687,10 +700,22 @@ async function fetchScores(){
   }
 }
 
+let refreshTimer = null;
+function startAutoRefresh(){
+  if(refreshTimer) return; // already running
+  refreshTimer = setInterval(fetchScores, 5000);
+}
+function stopAutoRefresh(){
+  if(refreshTimer){
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+}
+
 $("refreshBtn").addEventListener("click", fetchScores);
 
 fetchScores();
-setInterval(fetchScores, 5000);
+startAutoRefresh();
 </script>
 </body>
 </html>
