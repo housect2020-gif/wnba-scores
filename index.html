@@ -132,6 +132,8 @@
   td.pred-total{background:var(--pink);font-weight:700;}
   td.grand-total{background:var(--green);font-weight:700;}
   td.blank{background:#fbfbfc;}
+  .light-yellow{color:#d4b700 !important;}
+  select.light-yellow{color:#d4b700;}
   td.matchup-label{
     text-align:center;
     font-weight:600;
@@ -279,6 +281,10 @@ function round0AvgB4D4(B4, C4, D4){
   const avg = (B4 + C4 + D4) / 3;
   return Math.round(avg * 10) / 10;
 }
+function mround(value, multiple){
+  if(!multiple) return value;
+  return Math.round(value/multiple)*multiple;
+}
 function fmt(n, decimals){
   if(n === null || n === undefined || isNaN(n)) return "–";
   return decimals ? Number(n).toFixed(decimals) : String(round0(n));
@@ -315,7 +321,7 @@ function makeGameRowsHtml(gid){
       <td class="formula" id="${gid}-G2">–</td>
       <td><input type="number" id="${gid}-H2" disabled></td>
       <td class="formula" id="${gid}-I2">–</td>
-      <td class="blank"></td>
+      <td class="label light-yellow" id="${gid}-J2">Time left</td>
       <td class="label">(Tot Q1-3)+AVG</td>
       <td class="label">Needed to score in Q4</td>
       <td class="blank"></td>
@@ -331,7 +337,20 @@ function makeGameRowsHtml(gid){
       <td class="formula" id="${gid}-G3">–</td>
       <td><input type="number" id="${gid}-H3" disabled></td>
       <td class="formula" id="${gid}-I3">–</td>
-      <td class="blank"></td>
+      <td>
+        <select id="${gid}-J3" class="light-yellow">
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="5" selected>5</option>
+          <option value="6">6</option>
+          <option value="7">7</option>
+          <option value="8">8</option>
+          <option value="9">9</option>
+          <option value="10">10</option>
+        </select>
+      </td>
       <td class="formula" id="${gid}-K3">–</td>
       <td class="formula" id="${gid}-L3">–</td>
       <td class="formula" id="${gid}-M3">–</td>
@@ -346,7 +365,9 @@ function makeGameRowsHtml(gid){
       <td class="formula" id="${gid}-F4">–</td>
       <td class="formula" id="${gid}-G4">–</td>
       <td class="formula" id="${gid}-H4">–</td>
-      <td class="blank"></td><td class="blank"></td><td class="blank"></td><td class="blank"></td><td class="blank"></td>
+      <td class="blank"></td><td class="blank"></td><td class="blank"></td>
+      <td class="formula light-yellow" id="${gid}-L4">–</td>
+      <td class="blank"></td>
     </tr>
     <tr>
       <td class="rownum">${r5}</td>
@@ -382,6 +403,7 @@ function ensureGameBlock(gid){
     eg(gid, suffix).addEventListener("input", ()=>recalcGame(gid));
   });
   eg(gid, "J5").addEventListener("change", ()=>recalcGame(gid));
+  eg(gid, "J3").addEventListener("change", ()=>recalcGame(gid));
 }
 
 function enableManualFallbackBlock(){
@@ -438,6 +460,12 @@ function recalcGame(gid){
   const avgRounded = round0(avgQ13);
   const combined = round0(sumQ13 + avgRounded);
   eg(gid,"K3").textContent = `${round0(sumQ13)} (Avg: ${avgRounded}) = ${combined}`;
+
+  // L4 = MROUND((G2+G3)*(40/(40-J3)), 0.5)
+  const J3 = Number(eg(gid,"J3").value) || 5;
+  const timeLeftDenom = 40 - J3;
+  const L4 = timeLeftDenom !== 0 ? mround((G2+G3)*(40/timeLeftDenom), 0.5) : NaN;
+  eg(gid,"L4").textContent = fmt(L4, 1);
 
   // Row 5 (Predicted) — Q4 window is 5 min, full-game basis is 40 min
   const B5 = (B4/10)*40;
