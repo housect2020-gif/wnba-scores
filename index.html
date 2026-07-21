@@ -277,6 +277,13 @@ function showBanner(msg){
 
 function num(v){ const n = Number(v); return isNaN(n) ? 0 : n; }
 function round0(n){ return Math.round(n); }
+
+function saveField(gid, suffix, value){
+  try{ localStorage.setItem(`wnba_${suffix}_${gid}`, value); }catch(e){ /* storage unavailable — ignore */ }
+}
+function loadField(gid, suffix){
+  try{ return localStorage.getItem(`wnba_${suffix}_${gid}`); }catch(e){ return null; }
+}
 function round0AvgB4D4(B4, C4, D4){
   const avg = (B4 + C4 + D4) / 3;
   return Math.round(avg * 10) / 10;
@@ -397,13 +404,23 @@ function makeGameRowsHtml(gid){
 
 function ensureGameBlock(gid){
   if(gameState[gid]) return;
-  gameState[gid] = { q4Snapshot: { away: null, home: null } };
+  gameState[gid] = { q4Snapshot: { away: null, home: null }, backfillAttempted: false };
   $("gamesBody").insertAdjacentHTML("beforeend", makeGameRowsHtml(gid));
   ["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3","K5"].forEach(suffix=>{
     eg(gid, suffix).addEventListener("input", ()=>recalcGame(gid));
   });
   eg(gid, "J5").addEventListener("change", ()=>recalcGame(gid));
   eg(gid, "J3").addEventListener("change", ()=>recalcGame(gid));
+
+  // Persist the user's own entries (K5 odds, J5 pick, J3 minutes) so they
+  // stick across page reloads/refreshes on this browser until changed again.
+  ["K5","J5","J3"].forEach(suffix=>{
+    const elx = eg(gid, suffix);
+    const saved = loadField(gid, suffix);
+    if(saved !== null) elx.value = saved;
+    const evt = elx.tagName === "SELECT" ? "change" : "input";
+    elx.addEventListener(evt, ()=> saveField(gid, suffix, elx.value));
+  });
 }
 
 function enableManualFallbackBlock(){
@@ -542,22 +559,37 @@ function applyGameData(gid, away, home, status){
   eg(gid,"H2").value = awayQ4Live;
   eg(gid,"H3").value = homeQ4Live;
 
-  // F column = Q4 score snapshot captured once clock reaches <=5:00 in Q4
+  // F column: live Q4 score (same as H) until the clock hits <=5:00 remaining,
+  // at which point it freezes and stops updating for the rest of the game.
   if(period === 4 && state === "in"){
     const remaining = parseClockRemaining(status.clock);
     if(remaining !== null && remaining <= 5 && st.q4Snapshot.away === null){
       st.q4Snapshot.away = awayQ4Live;
       st.q4Snapshot.home = homeQ4Live;
+    } else if(remaining !== null && remaining < 5 && st.q4Snapshot.away === null && !st.backfillAttempted){
+      // We loaded the page after the 5:00 mark already passed — reconstruct
+      // the score as it stood at that moment from play-by-play instead of
+      // guessing with the current (later, higher) score.
+      st.backfillAttempted = true;
+      backfillQ4Snapshot(gid, away, home);
     }
   }
   if(period > 4 || state === "post"){
-    if(st.q4Snapshot.away === null){
-      st.q4Snapshot.away = awayQ4Live;
-      st.q4Snapshot.home = homeQ4Live;
+    if(st.q4Snapshot.away === null && !st.backfillAttempted){
+      st.backfillAttempted = true;
+      backfillQ4Snapshot(gid, away, home);
     }
   }
-  eg(gid,"F2").value = st.q4Snapshot.away !== null ? st.q4Snapshot.away : 0;
-  eg(gid,"F3").value = st.q4Snapshot.home !== null ? st.q4Snapshot.home : 0;
+
+  if(st.q4Snapshot.away !== null){
+    eg(gid,"F2").value = st.q4Snapshot.away;
+    eg(gid,"F3").value = st.q4Snapshot.home;
+  } else {
+    // Not frozen yet — mirror the live score just like H, so F reads live
+    // during the run-up to the 5-minute mark instead of sitting at 0.
+    eg(gid,"F2").value = awayQ4Live;
+    eg(gid,"F3").value = homeQ4Live;
+  }
 
   // matchup/status label
   let statusText;
@@ -612,6 +644,57 @@ function scoreboardUrls(){
     }
   }
   return attempts;
+}
+
+// Reconstructs the Q4 score exactly as it stood when the clock hit 5:00
+// remaining, using ESPN's per-game scoringPlays feed. Needed when the page
+// loads (or first sees this game) after that moment has already passed —
+// the scoreboard endpoint only ever gives the CURRENT score, not history.
+async function backfillQ4Snapshot(gid, away, home){
+  const st = gameState[gid];
+  if(!st) return;
+  const eventId = gid.slice(1); // strip leading "g"
+  const summaryTarget = `https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/summary?event=${eventId}`;
+  const awayQ13 = away.q1 + away.q2 + away.q3;
+  const homeQ13 = home.q1 + home.q2 + home.q3;
+
+  for(const wrap of PROXIES){
+    try{
+      const bust = `_=${Date.now()}`;
+      const sep = summaryTarget.includes("?") ? "&" : "?";
+      const url = wrap(summaryTarget + sep + bust);
+      const res = await fetch(url, { cache: "no-store" });
+      if(!res.ok) continue;
+      const data = await res.json();
+      const scoringPlays = data.scoringPlays || [];
+
+      // Find the last scoring play at/before the 5:00 mark of Q4.
+      let candidate = null;
+      for(const p of scoringPlays){
+        const per = p.period && p.period.number;
+        if(per !== 4) continue;
+        const remaining = parseClockRemaining(p.clock && p.clock.displayValue);
+        if(remaining === null) continue;
+        if(remaining >= 5) candidate = p;
+      }
+
+      if(candidate && typeof candidate.awayScore === "number" && typeof candidate.homeScore === "number"){
+        st.q4Snapshot.away = candidate.awayScore - awayQ13;
+        st.q4Snapshot.home = candidate.homeScore - homeQ13;
+      } else {
+        // No scoring happened at/before 5:00 in Q4 (rare) — treat as 0-0 at that mark.
+        st.q4Snapshot.away = 0;
+        st.q4Snapshot.home = 0;
+      }
+      recalcGame(gid);
+      return;
+    } catch(e){
+      // try next proxy
+    }
+  }
+  // All proxies failed — leave snapshot unset; it'll retry on the next poll
+  // since backfillAttempted only blocks re-triggering within this attempt cycle.
+  st.backfillAttempted = false;
 }
 
 function shortUrl(url){
