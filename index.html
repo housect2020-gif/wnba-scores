@@ -118,7 +118,8 @@
     text-align:center;
     font-weight:600;
     background:#fafbfc;
-    font-size:11px;
+    font-size:10px;
+    line-height:1.2;
   }
   td.label{
     text-align:center;
@@ -126,6 +127,14 @@
     color:#5f6368;
     font-style:italic;
     background:#fafbfc;
+  }
+  td.fit-line{
+    white-space:nowrap !important;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    font-size:9px;
+    padding-left:1px;
+    padding-right:1px;
   }
   td.formula{font-weight:600;}
   td.avg{background:var(--yellow);}
@@ -153,16 +162,29 @@
     max-width:38px;
     border:1px solid #c7cad0;
     border-radius:3px;
-    text-align:center;
+    text-align:center !important;
     font-size:11px;
     padding:2px 1px;
     font-family:inherit;
+    -moz-appearance:textfield;
+    -webkit-appearance:none;
+    appearance:none;
+    margin:0 auto;
+    display:block;
+  }
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button{
+    -webkit-appearance:none;
+    margin:0;
   }
   input[type=number]:disabled{
     border:none;
     background:transparent;
     color:#202124;
     font-weight:600;
+    text-align:center !important;
+    opacity:1;
+    -webkit-text-fill-color:#202124;
   }
   select{
     border:1px solid #c7cad0;
@@ -172,6 +194,10 @@
     font-family:inherit;
     width:100%;
     max-width:52px;
+    margin:0 auto;
+    display:block;
+    text-align:center !important;
+    text-align-last:center;
   }
   input.k5{
     max-width:48px;
@@ -214,7 +240,7 @@
     <table>
       <colgroup>
         <col style="width:2.5%">  <!-- rownum -->
-        <col style="width:18%">  <!-- Team -->
+        <col style="width:9%">   <!-- Team -->
         <col style="width:5%">   <!-- Q1 -->
         <col style="width:5%">   <!-- Q2 -->
         <col style="width:5%">   <!-- Q3 -->
@@ -224,9 +250,9 @@
         <col style="width:5%">   <!-- Q4 -->
         <col style="width:6%">   <!-- Total -->
         <col style="width:6%">   <!-- O/U -->
-        <col style="width:7%">   <!-- Odds -->
-        <col style="width:6%">   <!-- Diff. -->
-        <col style="width:13.5%"><!-- Suggested Pick -->
+        <col style="width:15%">  <!-- Odds -->
+        <col style="width:10%">  <!-- Diff. -->
+        <col style="width:10.5%"><!-- Suggested Pick -->
       </colgroup>
       <tr class="colhead">
         <th class="corner"></th>
@@ -329,8 +355,8 @@ function makeGameRowsHtml(gid){
       <td><input type="number" id="${gid}-H2" disabled></td>
       <td class="formula" id="${gid}-I2">–</td>
       <td class="label light-yellow" id="${gid}-J2">Time left</td>
-      <td class="label">(Tot Q1-3)+AVG</td>
-      <td class="label">Needed to score in Q4</td>
+      <td class="label fit-line">(Tot Q1-3)+AVG</td>
+      <td class="label fit-line">Needed to score in Q4</td>
       <td class="blank"></td>
     </tr>
     <tr>
@@ -358,7 +384,7 @@ function makeGameRowsHtml(gid){
           <option value="10">10</option>
         </select>
       </td>
-      <td class="formula" id="${gid}-K3">–</td>
+      <td class="formula fit-line" id="${gid}-K3">–</td>
       <td class="formula" id="${gid}-L3">–</td>
       <td class="formula" id="${gid}-M3">–</td>
     </tr>
