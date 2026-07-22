@@ -238,7 +238,7 @@
 
   <div class="sheet-scroll">
     <table>
-      <colgroup>
+      <colgroup id="mainColgroup">
         <col style="width:2.5%">  <!-- rownum -->
         <col style="width:9%">   <!-- Team -->
         <col style="width:5%">   <!-- Q1 -->
@@ -254,12 +254,12 @@
         <col style="width:10%">  <!-- Diff. -->
         <col style="width:10.5%"><!-- Suggested Pick -->
       </colgroup>
-      <tr class="colhead">
+      <tr class="colhead" id="colheadRow">
         <th class="corner"></th>
         <th>A</th><th>B</th><th>C</th><th>D</th><th>E</th><th>F</th>
         <th>G</th><th>H</th><th>I</th><th>J</th><th>K</th><th>L</th><th>M</th>
       </tr>
-      <tr class="hdr-row">
+      <tr class="hdr-row" id="hdrRow">
         <td class="rownum">1</td>
         <td>Team</td><td>Q1</td><td>Q2</td><td>Q3</td><td>Avg Q1-3</td>
         <td>Q4=5 min</td><td>T=35 min</td><td>Q4</td><td>Total</td>
@@ -288,6 +288,72 @@ let liveMode = false;
 let failCount = 0;
 let gameState = {};       // gid -> { q4Snapshot: {away, home} }
 let rowCounter = { n: 2 }; // continues across every game block, spreadsheet-style
+let extraOTCount = 0;      // number of overtime columns currently rendered (Q5, Q6, ...)
+
+function rebuildTableHeader(){
+  let colHtml = `
+    <col style="width:2.5%">
+    <col style="width:9%">
+    <col style="width:5%">
+    <col style="width:5%">
+    <col style="width:5%">
+    <col style="width:8%">
+    <col style="width:6%">
+    <col style="width:7%">
+    <col style="width:5%">
+  `;
+  for(let n=1;n<=extraOTCount;n++){ colHtml += `<col style="width:5%">`; }
+  colHtml += `
+    <col style="width:6%">
+    <col style="width:15%">
+    <col style="width:10%">
+    <col style="width:10.5%">
+  `;
+  $("mainColgroup").innerHTML = colHtml;
+
+  const totalDataCols = 13 + extraOTCount; // A..M plus any OT columns inserted after H
+  let colheadHtml = `<th class="corner"></th>`;
+  for(let i=0;i<totalDataCols;i++){
+    colheadHtml += `<th>${String.fromCharCode(65+i)}</th>`;
+  }
+  $("colheadRow").innerHTML = colheadHtml;
+
+  let hdrHtml = `
+    <td class="rownum">1</td>
+    <td>Team</td><td>Q1</td><td>Q2</td><td>Q3</td><td>Avg Q1-3</td>
+    <td>Q4=5 min</td><td>T=35 min</td><td>Q4</td>
+  `;
+  for(let n=1;n<=extraOTCount;n++){ hdrHtml += `<td>Q${4+n}</td>`; }
+  hdrHtml += `
+    <td>Total</td><td>O/U</td><td>Odds</td><td>Diff.</td><td>Suggested Pick</td>
+  `;
+  $("hdrRow").innerHTML = hdrHtml;
+}
+
+// Rebuilds the whole sheet with the wider column set needed for overtime.
+// Safe to do because K5/J5/J3 persist via localStorage and get restored by
+// ensureGameBlock, and F/Q4 snapshots re-derive themselves from live/backfill
+// data on the next applyGameData call for each game.
+function rebuildForOT(newCount){
+  extraOTCount = newCount;
+  gameState = {};
+  rowCounter = { n: 2 };
+  rebuildTableHeader();
+  $("gamesBody").innerHTML = "";
+}
+
+function neededOTCount(parsedList){
+  let maxPeriod = 4;
+  for(const g of parsedList){
+    if(g.status.period > maxPeriod) maxPeriod = g.status.period;
+  }
+  return Math.max(0, maxPeriod - 4);
+}
+
+function periodScore(team, period){
+  const entry = (team.linescores || []).find(l => l.period === period);
+  return entry ? num(entry.value) : null;
+}
 
 function setGlobalStatus(text, live){
   $("statusText").textContent = text;
@@ -338,10 +404,18 @@ function makeGameRowsHtml(gid){
   const r3 = rowCounter.n++;
   const r4 = rowCounter.n++;
   const r5 = rowCounter.n++;
+
+  let otCellsRow2 = "", otCellsRow3 = "", otCellsRow4 = "";
+  for(let n=1;n<=extraOTCount;n++){
+    otCellsRow2 += `<td class="formula" id="${gid}-OT${n}_2">–</td>`;
+    otCellsRow3 += `<td class="formula" id="${gid}-OT${n}_3">–</td>`;
+    otCellsRow4 += `<td class="formula" id="${gid}-OT${n}_4">–</td>`;
+  }
+
   return `
     <tr>
       <td class="rownum"></td>
-      <td colspan="13" class="matchup-label" id="${gid}-matchup">—</td>
+      <td colspan="${13 + extraOTCount}" class="matchup-label" id="${gid}-matchup">—</td>
     </tr>
     <tr>
       <td class="rownum">${r2}</td>
@@ -353,6 +427,7 @@ function makeGameRowsHtml(gid){
       <td><input type="number" id="${gid}-F2" disabled></td>
       <td class="formula" id="${gid}-G2">–</td>
       <td><input type="number" id="${gid}-H2" disabled></td>
+      ${otCellsRow2}
       <td class="formula" id="${gid}-I2">–</td>
       <td class="label light-yellow" id="${gid}-J2">Time left</td>
       <td class="label fit-line">(Tot Q1-3)+AVG</td>
@@ -369,6 +444,7 @@ function makeGameRowsHtml(gid){
       <td><input type="number" id="${gid}-F3" disabled></td>
       <td class="formula" id="${gid}-G3">–</td>
       <td><input type="number" id="${gid}-H3" disabled></td>
+      ${otCellsRow3}
       <td class="formula" id="${gid}-I3">–</td>
       <td>
         <select id="${gid}-J3" class="light-yellow">
@@ -398,6 +474,7 @@ function makeGameRowsHtml(gid){
       <td class="formula" id="${gid}-F4">–</td>
       <td class="formula" id="${gid}-G4">–</td>
       <td class="formula" id="${gid}-H4">–</td>
+      ${otCellsRow4}
       <td class="blank"></td><td class="blank"></td><td class="blank"></td>
       <td class="formula light-yellow" id="${gid}-L4">–</td>
       <td class="blank"></td>
@@ -412,6 +489,7 @@ function makeGameRowsHtml(gid){
       <td class="formula" id="${gid}-F5">–</td>
       <td class="formula pred-total" id="${gid}-G5">–</td>
       <td class="blank"></td>
+      ${extraOTCount > 0 ? `<td class="blank" colspan="${extraOTCount}"></td>` : ""}
       <td class="formula grand-total" id="${gid}-I5">–</td>
       <td>
         <select id="${gid}-J5">
@@ -424,7 +502,7 @@ function makeGameRowsHtml(gid){
       <td class="formula" id="${gid}-L5">–</td>
       <td class="formula" id="${gid}-M5">–</td>
     </tr>
-    <tr class="spacer-row"><td colspan="14"></td></tr>
+    <tr class="spacer-row"><td colspan="${14 + extraOTCount}"></td></tr>
   `;
 }
 
@@ -464,6 +542,10 @@ function enableManualFallbackBlock(){
 }
 
 function recalcGame(gid){
+  const st = gameState[gid] || {};
+  const otAway = st.otSumAway || 0;
+  const otHome = st.otSumHome || 0;
+
   const B2=num(eg(gid,"B2").value), C2=num(eg(gid,"C2").value), D2=num(eg(gid,"D2").value);
   const F2=num(eg(gid,"F2").value), H2=num(eg(gid,"H2").value);
   const B3=num(eg(gid,"B3").value), C3=num(eg(gid,"C3").value), D3=num(eg(gid,"D3").value);
@@ -472,7 +554,7 @@ function recalcGame(gid){
   // Row 2 (Away)
   const E2 = D2===0 ? (B2+C2)/2 : (B2+C2+D2)/3;
   const G2 = B2+C2+D2+F2;
-  const I2 = B2+C2+D2+H2;
+  const I2 = B2+C2+D2+H2+otAway;
   eg(gid,"E2").textContent = fmt(E2);
   eg(gid,"G2").textContent = fmt(G2);
   eg(gid,"I2").textContent = fmt(I2);
@@ -480,7 +562,7 @@ function recalcGame(gid){
   // Row 3 (Home) — E3 formula references row2 cells per spec
   const E3 = D2===0 ? (B2+C2)/2 : (B2+C2+D2)/3;
   const G3 = B3+C3+D3+F3;
-  const I3 = B3+C3+D3+H3;
+  const I3 = B3+C3+D3+H3+otHome;
   eg(gid,"E3").textContent = fmt(E3);
   eg(gid,"G3").textContent = fmt(G3);
   eg(gid,"I3").textContent = fmt(I3);
@@ -617,6 +699,30 @@ function applyGameData(gid, away, home, status){
     eg(gid,"F3").value = homeQ4Live;
   }
 
+  // Overtime columns (Q5, Q6, ...) — only show real values for a given game
+  // once it actually reaches that OT period; otherwise show a dash, since
+  // most games never need these columns at all.
+  let otSumAway = 0, otSumHome = 0;
+  for(let n=1; n<=extraOTCount; n++){
+    const periodNum = 4 + n;
+    const reached = period >= periodNum;
+    if(reached){
+      const aVal = periodScore(away, periodNum) ?? 0;
+      const hVal = periodScore(home, periodNum) ?? 0;
+      eg(gid, `OT${n}_2`).textContent = fmt(aVal);
+      eg(gid, `OT${n}_3`).textContent = fmt(hVal);
+      eg(gid, `OT${n}_4`).textContent = fmt(aVal + hVal);
+      otSumAway += aVal;
+      otSumHome += hVal;
+    } else {
+      eg(gid, `OT${n}_2`).textContent = "–";
+      eg(gid, `OT${n}_3`).textContent = "–";
+      eg(gid, `OT${n}_4`).textContent = "–";
+    }
+  }
+  st.otSumAway = otSumAway;
+  st.otSumHome = otSumHome;
+
   // matchup/status label
   let statusText;
   if(state === "pre"){
@@ -747,7 +853,8 @@ function parseEvent(ev){
     q1: quarterPoints(c.linescores, 1),
     q2: quarterPoints(c.linescores, 2),
     q3: quarterPoints(c.linescores, 3),
-    q4: quarterPoints(c.linescores, 4)
+    q4: quarterPoints(c.linescores, 4),
+    linescores: c.linescores || []
   });
 
   const statusBlock = comp.status || ev.status || {};
@@ -807,6 +914,11 @@ async function fetchScores(){
 
     const liveCount = parsedList.filter(g => g.status.state === "in").length;
     const allFinal = parsedList.every(g => g.status.state === "post");
+
+    const needed = neededOTCount(parsedList);
+    if(needed > extraOTCount){
+      rebuildForOT(needed);
+    }
 
     for(const g of parsedList){
       applyGameData("g" + g.id, g.away, g.home, g.status);
