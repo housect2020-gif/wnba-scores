@@ -821,9 +821,15 @@ async function backfillQ4Snapshot(gid, away, home){
         st.q4Snapshot.away = candidate.awayScore - awayQ13;
         st.q4Snapshot.home = candidate.homeScore - homeQ13;
       } else {
-        // No scoring happened at/before 5:00 in Q4 (rare) — treat as 0-0 at that mark.
-        st.q4Snapshot.away = 0;
-        st.q4Snapshot.home = 0;
+        // Play-by-play reconstruction didn't find a usable data point (ESPN's
+        // scoringPlays schema isn't consistently documented, so this can
+        // legitimately fail). Falling back to a hardcoded 0-0 was almost
+        // always wrong — a team virtually never scores exactly 0 points in
+        // the first 5 minutes of a quarter. Use the team's actual final Q4
+        // score instead: a real, always-available number that's a far more
+        // reasonable stand-in than a guaranteed-wrong zero.
+        st.q4Snapshot.away = away.q4;
+        st.q4Snapshot.home = home.q4;
       }
 
       // recalcGame() only updates formula/text cells — F2/F3 are live <input>
