@@ -138,8 +138,8 @@
   }
   td.formula{font-weight:600;}
   td.avg{background:var(--yellow);}
-  td.pred-total{background:var(--pink);font-weight:700;}
-  td.grand-total{background:var(--green);font-weight:700;}
+  td.pred-total{background:var(--pink) !important;font-weight:700;}
+  td.grand-total{background:var(--green) !important;font-weight:700;}
   td.blank{background:#fbfbfc;}
   .light-yellow{color:#d4b700 !important;}
   select.light-yellow{color:#d4b700;}
@@ -476,7 +476,7 @@ function makeGameRowsHtml(gid){
       <td class="formula" id="${gid}-H4">–</td>
       ${otCellsRow4}
       <td class="blank"></td><td class="blank"></td>
-      <td class="formula" id="${gid}-K4">–</td>
+      <td class="formula grand-total" id="${gid}-K4">–</td>
       <td class="formula light-yellow" id="${gid}-L4">–</td>
       <td class="blank"></td>
     </tr>
@@ -649,15 +649,15 @@ function recalcGame(gid){
   }
   eg(gid,"M5").textContent = M5 === "" ? "–" : M5;
 
-  // K4 background: green (same as I5) when the J5/K5 pick is currently
+  // L5 background: green (same as I5) when the J5/K5 pick is currently
   // winning against the live total (I5); pink (same as G5) otherwise.
   const J5val = eg(gid,"J5").value;
   const pickWinning =
     (J5val === "Over" && K5 !== null && K5 < I5) ||
     (J5val === "Under" && K5 !== null && K5 > I5);
-  const k4El = eg(gid,"K4");
-  k4El.classList.remove("grand-total", "pred-total");
-  k4El.classList.add(pickWinning ? "grand-total" : "pred-total");
+  const l5El = eg(gid,"L5");
+  l5El.classList.remove("grand-total", "pred-total");
+  l5El.classList.add(pickWinning ? "grand-total" : "pred-total");
 }
 
 function applyGameData(gid, away, home, status){
