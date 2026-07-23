@@ -448,16 +448,7 @@ function makeGameRowsHtml(gid){
       <td class="formula" id="${gid}-I3">–</td>
       <td>
         <select id="${gid}-J3" class="light-yellow">
-          <option value="1">1</option>
-          <option value="2">2</option>
-          <option value="3">3</option>
-          <option value="4">4</option>
-          <option value="5" selected>5</option>
-          <option value="6">6</option>
-          <option value="7">7</option>
-          <option value="8">8</option>
-          <option value="9">9</option>
-          <option value="10">10</option>
+          ${Array.from({length:20}, (_,i)=>i+1).map(n=>`<option value="${n}"${n===5?" selected":""}>${n}</option>`).join("")}
         </select>
       </td>
       <td class="formula fit-line" id="${gid}-K3">–</td>
@@ -811,6 +802,11 @@ async function backfillQ4Snapshot(gid, away, home){
       const data = await res.json();
       const scoringPlays = data.scoringPlays || [];
 
+      // If the sheet was rebuilt (e.g. a new OT column appeared) while this
+      // request was in flight, this game's state object is now orphaned —
+      // bail out rather than writing into a stale/disconnected game.
+      if(gameState[gid] !== st) return;
+
       // Find the last scoring play at/before the 5:00 mark of Q4.
       let candidate = null;
       for(const p of scoringPlays){
@@ -829,6 +825,15 @@ async function backfillQ4Snapshot(gid, away, home){
         st.q4Snapshot.away = 0;
         st.q4Snapshot.home = 0;
       }
+
+      // recalcGame() only updates formula/text cells — F2/F3 are live <input>
+      // elements, so they need to be written directly or the reconstructed
+      // value never actually appears on screen (this was the bug).
+      const f2El = eg(gid, "F2");
+      const f3El = eg(gid, "F3");
+      if(f2El) f2El.value = st.q4Snapshot.away;
+      if(f3El) f3El.value = st.q4Snapshot.home;
+
       recalcGame(gid);
       return;
     } catch(e){
