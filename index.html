@@ -475,7 +475,8 @@ function makeGameRowsHtml(gid){
       <td class="formula" id="${gid}-G4">–</td>
       <td class="formula" id="${gid}-H4">–</td>
       ${otCellsRow4}
-      <td class="blank"></td><td class="blank"></td><td class="blank"></td>
+      <td class="blank"></td><td class="blank"></td>
+      <td class="formula" id="${gid}-K4">–</td>
       <td class="formula light-yellow" id="${gid}-L4">–</td>
       <td class="blank"></td>
     </tr>
@@ -647,6 +648,16 @@ function recalcGame(gid){
     M5 = "Under";
   }
   eg(gid,"M5").textContent = M5 === "" ? "–" : M5;
+
+  // K4 background: green (same as I5) when the J5/K5 pick is currently
+  // winning against the live total (I5); pink (same as G5) otherwise.
+  const J5val = eg(gid,"J5").value;
+  const pickWinning =
+    (J5val === "Over" && K5 !== null && K5 < I5) ||
+    (J5val === "Under" && K5 !== null && K5 > I5);
+  const k4El = eg(gid,"K4");
+  k4El.classList.remove("grand-total", "pred-total");
+  k4El.classList.add(pickWinning ? "grand-total" : "pred-total");
 }
 
 function applyGameData(gid, away, home, status){
@@ -961,10 +972,71 @@ function stopAutoRefresh(){
   }
 }
 
+// --- Live over/under totals (The Odds API) ---
+// One request covers every WNBA game at once, so this runs on its own,
+// much slower interval than the 5s score poll — the free tier's monthly
+// quota is small, and a total line doesn't need second-by-second updates.
+const ODDS_API_KEY = "fc97d44282a5e9a7ab182a109b2559c7";
+const ODDS_API_URL = `https://api.the-odds-api.com/v4/sports/basketball_wnba/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=totals`;
+
+function normalizeTeamName(name){
+  return (name || "").toLowerCase().trim();
+}
+
+function extractTotalPoint(game){
+  for(const bk of (game.bookmakers || [])){
+    const totals = (bk.markets || []).find(m => m.key === "totals");
+    if(totals && Array.isArray(totals.outcomes)){
+      const withPoint = totals.outcomes.find(o => typeof o.point === "number");
+      if(withPoint) return withPoint.point;
+    }
+  }
+  return null;
+}
+
+function applyOddsData(games){
+  for(const g of games){
+    const point = extractTotalPoint(g);
+    if(point === null) continue;
+    const away = normalizeTeamName(g.away_team);
+    const home = normalizeTeamName(g.home_team);
+
+    for(const gid of Object.keys(gameState)){
+      const awayEl = document.getElementById(`${gid}-awayName`);
+      const homeEl = document.getElementById(`${gid}-homeName`);
+      const k4El = document.getElementById(`${gid}-K4`);
+      if(!awayEl || !homeEl || !k4El) continue;
+      if(normalizeTeamName(awayEl.textContent) === away && normalizeTeamName(homeEl.textContent) === home){
+        k4El.textContent = fmt(point, 1);
+      }
+    }
+  }
+}
+
+async function fetchOdds(){
+  const attempts = [ODDS_API_URL, PROXIES[0](ODDS_API_URL), PROXIES[1](ODDS_API_URL)];
+  for(const url of attempts){
+    try{
+      const res = await fetch(url, { cache: "no-store" });
+      if(res.status === 401){ console.error("Odds API: invalid key"); return; }
+      if(res.status === 429){ console.error("Odds API: rate limit / quota exceeded"); return; }
+      if(!res.ok) continue;
+      const data = await res.json();
+      applyOddsData(data);
+      return;
+    } catch(e){
+      // try next
+    }
+  }
+}
+
 $("refreshBtn").addEventListener("click", fetchScores);
 
 fetchScores();
 startAutoRefresh();
+
+fetchOdds();
+setInterval(fetchOdds, 60000);
 </script>
 </body>
 </html>
