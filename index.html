@@ -501,7 +501,7 @@ function makeGameRowsHtml(gid){
 
 function ensureGameBlock(gid){
   if(gameState[gid]) return;
-  gameState[gid] = { q4Snapshot: { away: null, home: null }, backfillAttempted: false, pregameOddsCaptured: false, lastState: "pre" };
+  gameState[gid] = { q4Snapshot: { away: null, home: null }, backfillAttempted: false, lastState: "pre" };
   $("gamesBody").insertAdjacentHTML("beforeend", makeGameRowsHtml(gid));
   ["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3","K5"].forEach(suffix=>{
     eg(gid, suffix).addEventListener("input", ()=>recalcGame(gid));
@@ -518,6 +518,15 @@ function ensureGameBlock(gid){
     const evt = elx.tagName === "SELECT" ? "change" : "input";
     elx.addEventListener(evt, ()=> saveField(gid, suffix, elx.value));
   });
+
+  // J4 (pre-game odds) isn't a user input — restore its last known value on
+  // reload so it doesn't blank out to "–" while waiting for the next odds
+  // fetch. Whether it keeps updating from here depends on the game's actual
+  // state, handled in applyOddsData.
+  const savedJ4 = loadField(gid, "J4");
+  if(savedJ4 !== null){
+    eg(gid, "J4").textContent = savedJ4;
+  }
 }
 
 function enableManualFallbackBlock(){
@@ -1039,11 +1048,14 @@ function applyOddsData(games){
       if(normalizeTeamName(awayEl.textContent) === away && normalizeTeamName(homeEl.textContent) === home){
         k4El.textContent = fmt(point, 1);
 
-        // J4 = pre-game odds, captured once and frozen from then on.
+        // J4 = pre-game odds. Keeps updating with the latest line on every
+        // odds fetch as long as the game hasn't started yet, then freezes
+        // automatically the moment its real state stops being "pre".
         const st = gameState[gid];
-        if(j4El && st && !st.pregameOddsCaptured){
-          j4El.textContent = fmt(point, 1);
-          st.pregameOddsCaptured = true;
+        if(j4El && st && st.lastState === "pre"){
+          const j4Text = fmt(point, 1);
+          j4El.textContent = j4Text;
+          saveField(gid, "J4", j4Text);
         }
       }
     }
