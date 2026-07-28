@@ -466,7 +466,8 @@ function makeGameRowsHtml(gid){
       <td class="formula" id="${gid}-G4">–</td>
       <td class="formula" id="${gid}-H4">–</td>
       ${otCellsRow4}
-      <td class="blank"></td><td class="blank"></td>
+      <td class="blank"></td>
+      <td class="formula" id="${gid}-J4">–</td>
       <td class="formula grand-total" id="${gid}-K4">–</td>
       <td class="formula light-yellow" id="${gid}-L4">–</td>
       <td class="blank"></td>
@@ -500,7 +501,7 @@ function makeGameRowsHtml(gid){
 
 function ensureGameBlock(gid){
   if(gameState[gid]) return;
-  gameState[gid] = { q4Snapshot: { away: null, home: null }, backfillAttempted: false };
+  gameState[gid] = { q4Snapshot: { away: null, home: null }, backfillAttempted: false, pregameOddsCaptured: false, lastState: "pre" };
   $("gamesBody").insertAdjacentHTML("beforeend", makeGameRowsHtml(gid));
   ["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3","K5"].forEach(suffix=>{
     eg(gid, suffix).addEventListener("input", ()=>recalcGame(gid));
@@ -663,6 +664,7 @@ function applyGameData(gid, away, home, status){
 
   const period = status.period;
   const state = status.state; // 'pre' | 'in' | 'post'
+  st.lastState = state;
 
   const awayQ4Live = period >= 4 ? away.q4 : 0;
   const homeQ4Live = period >= 4 ? home.q4 : 0;
@@ -952,10 +954,17 @@ async function fetchScores(){
       stopAutoRefresh();
       setGlobalStatus(`${parsedList.length} game${parsedList.length>1?"s":""} — all final`, false);
       $("clockInfo").textContent = "All games final — auto-refresh stopped";
-    } else {
-      setGlobalStatus(`${parsedList.length} game${parsedList.length>1?"s":""} found — ${liveCount} live`, liveCount > 0);
+    } else if(liveCount > 0){
+      setGlobalStatus(`${parsedList.length} game${parsedList.length>1?"s":""} found — ${liveCount} live`, true);
       $("clockInfo").textContent = "Auto-refreshing every 5s";
-      startAutoRefresh();
+      scheduleAutoRefresh(5000);
+    } else {
+      // Every game is still pre-game — no need to hammer the API every 5s
+      // hours before tip-off. Check back every 10 minutes instead, and this
+      // will automatically switch to 5s the moment any game goes live.
+      setGlobalStatus(`${parsedList.length} game${parsedList.length>1?"s":""} found — pre-game`, false);
+      $("clockInfo").textContent = "Pre-game — refreshing every 10 min";
+      scheduleAutoRefresh(10 * 60 * 1000);
     }
 
   } catch(err){
@@ -968,19 +977,28 @@ async function fetchScores(){
     } else {
       showBanner("Refresh failed — showing last known data. Will retry automatically.");
     }
+    // Keep retrying at a moderate pace until a fetch succeeds and we know
+    // the real game state (which will then pick the right interval itself).
+    if(!refreshTimer){
+      scheduleAutoRefresh(30000);
+    }
   }
 }
 
 let refreshTimer = null;
-function startAutoRefresh(){
-  if(refreshTimer) return; // already running
-  refreshTimer = setInterval(fetchScores, 5000);
+let currentIntervalMs = null;
+function scheduleAutoRefresh(intervalMs){
+  if(refreshTimer && currentIntervalMs === intervalMs) return; // already running at the right pace
+  if(refreshTimer){ clearInterval(refreshTimer); refreshTimer = null; }
+  currentIntervalMs = intervalMs;
+  refreshTimer = setInterval(fetchScores, intervalMs);
 }
 function stopAutoRefresh(){
   if(refreshTimer){
     clearInterval(refreshTimer);
     refreshTimer = null;
   }
+  currentIntervalMs = null;
 }
 
 // --- Live over/under totals (The Odds API) ---
@@ -1016,9 +1034,17 @@ function applyOddsData(games){
       const awayEl = document.getElementById(`${gid}-awayName`);
       const homeEl = document.getElementById(`${gid}-homeName`);
       const k4El = document.getElementById(`${gid}-K4`);
+      const j4El = document.getElementById(`${gid}-J4`);
       if(!awayEl || !homeEl || !k4El) continue;
       if(normalizeTeamName(awayEl.textContent) === away && normalizeTeamName(homeEl.textContent) === home){
         k4El.textContent = fmt(point, 1);
+
+        // J4 = pre-game odds, captured once and frozen from then on.
+        const st = gameState[gid];
+        if(j4El && st && !st.pregameOddsCaptured){
+          j4El.textContent = fmt(point, 1);
+          st.pregameOddsCaptured = true;
+        }
       }
     }
   }
@@ -1044,7 +1070,6 @@ async function fetchOdds(){
 $("refreshBtn").addEventListener("click", fetchScores);
 
 fetchScores();
-startAutoRefresh();
 
 fetchOdds();
 setInterval(fetchOdds, 60000);
