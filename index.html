@@ -199,8 +199,8 @@
     text-align:center !important;
     text-align-last:center;
   }
-  input.k5{
-    max-width:48px;
+  .k5{
+    max-width:60px;
   }
   .footer{
     margin-top:12px;
@@ -491,7 +491,7 @@ function makeGameRowsHtml(gid){
           <option value="Over">Over</option>
         </select>
       </td>
-      <td><input type="number" step="0.1" class="k5" id="${gid}-K5" placeholder="0.0"></td>
+      <td><select class="k5" id="${gid}-K5"><option value="">–</option></select></td>
       <td class="formula" id="${gid}-L5">–</td>
       <td class="formula" id="${gid}-M5">–</td>
     </tr>
@@ -503,18 +503,26 @@ function ensureGameBlock(gid){
   if(gameState[gid]) return;
   gameState[gid] = { q4Snapshot: { away: null, home: null }, backfillAttempted: false, lastState: "pre" };
   $("gamesBody").insertAdjacentHTML("beforeend", makeGameRowsHtml(gid));
-  ["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3","K5"].forEach(suffix=>{
+  ["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3"].forEach(suffix=>{
     eg(gid, suffix).addEventListener("input", ()=>recalcGame(gid));
   });
   eg(gid, "J5").addEventListener("change", ()=>recalcGame(gid));
   eg(gid, "J3").addEventListener("change", ()=>recalcGame(gid));
+  eg(gid, "K5").addEventListener("change", ()=>recalcGame(gid));
 
   // Persist the user's own entries (K5 odds, J5 pick, J3 minutes) so they
   // stick across page reloads/refreshes on this browser until changed again.
+  // K5's options don't exist yet at block-creation time (built dynamically
+  // in rebuildK5Options once I5 is known), so its restore is deferred via
+  // pendingK5Restore and applied on the first options build instead.
   ["K5","J5","J3"].forEach(suffix=>{
     const elx = eg(gid, suffix);
     const saved = loadField(gid, suffix);
-    if(saved !== null) elx.value = saved;
+    if(suffix === "K5"){
+      if(saved !== null) gameState[gid].pendingK5Restore = saved;
+    } else if(saved !== null){
+      elx.value = saved;
+    }
     const evt = elx.tagName === "SELECT" ? "change" : "input";
     elx.addEventListener(evt, ()=> saveField(gid, suffix, elx.value));
   });
@@ -541,6 +549,53 @@ function enableManualFallbackBlock(){
   eg("manual","homeName").textContent = "Home Team";
   eg("manual","matchup").textContent = "Manual entry — live lookup unavailable";
   recalcGame("manual");
+}
+
+// Rebuilds K5's dropdown options to span the live +/-20 range around the
+// current total (floored at 0.5 — a total-points line can't be zero or
+// negative). Only touches the DOM when the actual range has changed, so it
+// doesn't disrupt an open dropdown on every 5s poll. Preserves whatever the
+// user currently has selected if it's still valid in the new range, or
+// applies a pending restored-from-localStorage value on first build.
+function rebuildK5Options(gid, I5){
+  const el = eg(gid, "K5");
+  const st = gameState[gid];
+
+  let center = I5 + 0.5;
+  let min = center - 20;
+  const max = center + 20;
+  if(min < 0.5) min = 0.5; // never go zero or negative
+
+  const count = Math.round((max - min) / 1);
+  const key = `${min}:${max}`;
+  if(el.dataset.rangeKey === key) return; // range unchanged, nothing to rebuild
+  el.dataset.rangeKey = key;
+
+  const prevValue = el.value;
+
+  let html = '<option value="">–</option>';
+  const values = [];
+  for(let i = 0; i <= count; i++){
+    const v = min + i * 1;
+    values.push(v);
+    html += `<option value="${v}">${v.toFixed(1)}</option>`;
+  }
+  el.innerHTML = html;
+
+  // First build after a page load: apply the restored localStorage value.
+  if(st && st.pendingK5Restore !== undefined && st.pendingK5Restore !== null){
+    const restore = Number(st.pendingK5Restore);
+    if(values.some(v => v.toFixed(1) === restore.toFixed(1))){
+      el.value = restore.toFixed(1);
+    }
+    delete st.pendingK5Restore;
+    return;
+  }
+
+  // Otherwise keep whatever was already selected if it's still valid.
+  if(prevValue !== "" && values.some(v => v.toFixed(1) === Number(prevValue).toFixed(1))){
+    el.value = prevValue;
+  }
 }
 
 function recalcGame(gid){
@@ -612,6 +667,11 @@ function recalcGame(gid){
   eg(gid,"G5").textContent = fmt(G5);
   eg(gid,"I5").textContent = fmt(I5);
 
+  // K5 dropdown: always centered on the nearest half-point above the
+  // current live total (I5 is always a whole number), spanning +/-20
+  // either side, floored at 0.5. e.g. I5=160 -> 140.5 to 180.5.
+  rebuildK5Options(gid, I5);
+
   // M3
   const avgB4D4 = round0AvgB4D4(B4, C4, D4);
   let M3;
@@ -631,22 +691,24 @@ function recalcGame(gid){
   const L5 = K5 === null ? "–" : fmt(Math.abs(K5 - I5), 1);
   eg(gid,"L5").textContent = L5;
 
-  // M5
-  const f2Blank = eg(gid,"F2").value === "";
-  const f3Blank = eg(gid,"F3").value === "";
+  // M5 (Suggested Pick) — revised logic:
+  // Stay blank until this game has actually reached the Q4 5-minute freeze
+  // point (a real "we're late enough to trust the projection" gate — the
+  // old ISBLANK(F2) check no longer meant that, since F2 now mirrors live
+  // scoring from Q1 onward). Once unlocked, compare the sheet's own
+  // blended full-game projection (G5) directly against the entered line
+  // (K5) — this replaces the old M3-driven logic, which almost always
+  // resolved the pick before ever reaching the G5/K5 comparison.
+  const q4Locked = st.q4Snapshot && st.q4Snapshot.away !== null;
   let M5;
-  if(f2Blank || f3Blank){
+  if(!q4Locked || K5 === null){
     M5 = "";
-  } else if(M3 === "Above Avg"){
+  } else if(G5 > K5){
+    M5 = "Over";
+  } else if(G5 < K5){
     M5 = "Under";
-  } else if(M3 === "Below Avg"){
-    M5 = "Over";
-  } else if(F4 <= 15){
-    M5 = "Over";
-  } else if(K5 !== null && K5 > G5){
-    M5 = "Over";
   } else {
-    M5 = "Under";
+    M5 = "";
   }
   eg(gid,"M5").textContent = M5 === "" ? "–" : M5;
 
