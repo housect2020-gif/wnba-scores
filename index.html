@@ -917,55 +917,76 @@ async function countEspnGamesOnDate(dateStr){
   return null; // couldn't determine — caller should treat this as "give up"
 }
 
-let cachedFirstWnbaId = null;
-let cachedFirstWnbaIdForDate = null;
+const firstIdCache = {}; // dateStr -> id, in-memory cache per date
 
-// Returns today's first WNBA.com game ID, walking forward from the anchor
-// and summing each day's game count along the way. Cached both in memory
-// and localStorage so this expensive walk only happens once per calendar
-// day, not on every 5s poll.
-async function getTodaysFirstWnbaId(){
-  const todayStr = ymd(new Date());
-  if(cachedFirstWnbaId !== null && cachedFirstWnbaIdForDate === todayStr){
-    return cachedFirstWnbaId;
-  }
+// Returns the first WNBA.com game ID for ANY given date, walking forward
+// from the anchor and summing each day's game count along the way. Cached
+// both in memory and localStorage per-date, so this expensive walk only
+// happens once per date ever needed, not on every 5s poll.
+//
+// Deliberately takes a date parameter rather than always using "now" —
+// ESPN's default "today" scoreboard can still include last night's late
+// games after midnight has locally passed, so the correct WNBA-ID date to
+// use is each game's OWN date, never just "whatever the clock says right
+// now". Using "now" here was the actual bug behind wrong wnbaIds showing
+// up for late-night games.
+async function getFirstWnbaIdForDate(dateStr){
+  if(firstIdCache[dateStr] !== undefined) return firstIdCache[dateStr];
 
-  const storageKey = `wnba_first_id_${todayStr}`;
+  const storageKey = `wnba_first_id_${dateStr}`;
   try{
     const stored = localStorage.getItem(storageKey);
     if(stored !== null){
-      cachedFirstWnbaId = Number(stored);
-      cachedFirstWnbaIdForDate = todayStr;
-      console.log(`[WNBA backfill] getTodaysFirstWnbaId() -> ${cachedFirstWnbaId} (from localStorage cache)`);
-      return cachedFirstWnbaId;
+      const id = Number(stored);
+      firstIdCache[dateStr] = id;
+      console.log(`[WNBA backfill] getFirstWnbaIdForDate(${dateStr}) -> ${id} (from localStorage cache)`);
+      return id;
     }
   } catch(e){ /* localStorage unavailable — ignore */ }
 
-  if(todayStr === WNBA_ID_ANCHOR_DATE){
-    cachedFirstWnbaId = WNBA_ID_ANCHOR_ID;
-    cachedFirstWnbaIdForDate = todayStr;
-    console.log(`[WNBA backfill] getTodaysFirstWnbaId() -> ${cachedFirstWnbaId} (today is the anchor date)`);
-    return cachedFirstWnbaId;
+  if(dateStr === WNBA_ID_ANCHOR_DATE){
+    firstIdCache[dateStr] = WNBA_ID_ANCHOR_ID;
+    console.log(`[WNBA backfill] getFirstWnbaIdForDate(${dateStr}) -> ${WNBA_ID_ANCHOR_ID} (is the anchor date)`);
+    return WNBA_ID_ANCHOR_ID;
   }
 
-  let cursor = parseYmd(WNBA_ID_ANCHOR_DATE);
-  const today = parseYmd(todayStr);
-  let id = WNBA_ID_ANCHOR_ID;
+  const target = parseYmd(dateStr);
+  const anchor = parseYmd(WNBA_ID_ANCHOR_DATE);
 
-  while(cursor < today){
-    const count = await countEspnGamesOnDate(ymd(cursor));
-    if(count === null){
-      console.error(`[WNBA backfill] getTodaysFirstWnbaId() -> giving up, could not count games on ${ymd(cursor)}`);
-      return null; // can't compute reliably — caller falls back
+  if(target > anchor){
+    // Walk forward from the anchor, summing each day's game count.
+    let cursor = parseYmd(WNBA_ID_ANCHOR_DATE);
+    let id = WNBA_ID_ANCHOR_ID;
+    while(cursor < target){
+      const count = await countEspnGamesOnDate(ymd(cursor));
+      if(count === null){
+        console.error(`[WNBA backfill] getFirstWnbaIdForDate(${dateStr}) -> giving up, could not count games on ${ymd(cursor)}`);
+        return null; // can't compute reliably — caller falls back
+      }
+      id += count;
+      cursor.setDate(cursor.getDate() + 1);
     }
-    id += count;
-    cursor.setDate(cursor.getDate() + 1);
+    try{ localStorage.setItem(storageKey, String(id)); } catch(e){}
+    firstIdCache[dateStr] = id;
+    return id;
+  } else {
+    // Walk backward from the anchor, subtracting each day's game count.
+    let cursor = parseYmd(WNBA_ID_ANCHOR_DATE);
+    cursor.setDate(cursor.getDate() - 1);
+    let id = WNBA_ID_ANCHOR_ID;
+    while(cursor >= target){
+      const count = await countEspnGamesOnDate(ymd(cursor));
+      if(count === null){
+        console.error(`[WNBA backfill] getFirstWnbaIdForDate(${dateStr}) -> giving up, could not count games on ${ymd(cursor)}`);
+        return null;
+      }
+      id -= count;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    try{ localStorage.setItem(storageKey, String(id)); } catch(e){}
+    firstIdCache[dateStr] = id;
+    return id;
   }
-
-  try{ localStorage.setItem(storageKey, String(id)); } catch(e){}
-  cachedFirstWnbaId = id;
-  cachedFirstWnbaIdForDate = todayStr;
-  return id;
 }
 
 // Reconstructs the Q4 score exactly as it stood when the clock hit 5:00
@@ -1062,19 +1083,19 @@ async function attemptWnbaBackfill(gid, away, home){
     console.error(`[WNBA backfill] ${gid}: no gameState found`);
     return false;
   }
-
-  const firstId = await getTodaysFirstWnbaId();
-  if(firstId === null){
-    console.error(`[WNBA backfill] ${gid}: getTodaysFirstWnbaId() returned null, giving up`);
+  if(st.wnbaGameDate === undefined || st.wnbaGameIndex === undefined){
+    console.error(`[WNBA backfill] ${gid}: wnbaGameDate/wnbaGameIndex is undefined, giving up`);
     return false;
   }
-  if(st.wnbaGameIndex === undefined){
-    console.error(`[WNBA backfill] ${gid}: wnbaGameIndex is undefined, giving up`);
+
+  const firstId = await getFirstWnbaIdForDate(st.wnbaGameDate);
+  if(firstId === null){
+    console.error(`[WNBA backfill] ${gid}: getFirstWnbaIdForDate(${st.wnbaGameDate}) returned null, giving up`);
     return false;
   }
 
   const wnbaId = firstId + st.wnbaGameIndex;
-  console.log(`[WNBA backfill] ${gid}: trying wnbaId=${wnbaId} (firstId=${firstId} + index=${st.wnbaGameIndex})`);
+  console.log(`[WNBA backfill] ${gid}: trying wnbaId=${wnbaId} (date=${st.wnbaGameDate}, firstId=${firstId} + index=${st.wnbaGameIndex})`);
   const target = `https://cdn.wnba.com/static/json/liveData/playbyplay/playbyplay_${wnbaId}.json`;
   const attempts = [scrapingBeeUrl(target), target, ...PROXIES.slice(0, 3).map(w => w(target))];
 
@@ -1246,16 +1267,27 @@ async function fetchScores(){
       rebuildForOT(needed);
     }
 
+    // Index games per THEIR OWN date, not a flat index across the whole
+    // list — ESPN's "today" response can include late-night games that
+    // actually belong to the previous calendar day (e.g. right after
+    // midnight), and mixing those into one flat count would compute the
+    // wrong WNBA.com ID for every game in the mismatched date.
+    const dateIndexCounters = {};
     for(const g of parsedList){
       const gid = "g" + g.id;
-      // Must set wnbaGameIndex BEFORE applyGameData runs — applyGameData is
-      // what triggers the Q4 backfill internally, and that backfill needs
-      // this index to compute the WNBA.com game ID. Setting it after was a
-      // real bug: the first backfill attempt for any game would always find
-      // this undefined, silently fall back to the less-precise ESPN source,
-      // and then never retry since the fallback already "succeeded".
+      const gameDateStr = ymd(new Date(g.date));
+      const idx = dateIndexCounters[gameDateStr] || 0;
+      dateIndexCounters[gameDateStr] = idx + 1;
+
+      // Must set these BEFORE applyGameData runs — applyGameData is what
+      // triggers the Q4 backfill internally, and that backfill needs them
+      // to compute the WNBA.com game ID. Setting them after was a real
+      // bug: the first backfill attempt for any game would always find
+      // these undefined, silently fall back to the less-precise ESPN
+      // source, and then never retry since the fallback already "succeeded".
       ensureGameBlock(gid); // safe no-op if the block already exists
-      gameState[gid].wnbaGameIndex = parsedList.indexOf(g);
+      gameState[gid].wnbaGameDate = gameDateStr;
+      gameState[gid].wnbaGameIndex = idx;
       applyGameData(gid, g.away, g.home, g.status, g.overUnder);
     }
 
