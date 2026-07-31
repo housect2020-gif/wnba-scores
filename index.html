@@ -894,11 +894,14 @@ async function countEspnGamesOnDate(dateStr){
       const res = await fetch(wrap(target), { cache: "no-store" });
       if(!res.ok) continue;
       const data = await res.json();
-      return (data.events || []).length;
+      const count = (data.events || []).length;
+      console.log(`[WNBA backfill] countEspnGamesOnDate(${dateStr}) -> ${count} games`);
+      return count;
     } catch(e){
       // try next proxy
     }
   }
+  console.error(`[WNBA backfill] countEspnGamesOnDate(${dateStr}) -> FAILED on every proxy`);
   return null; // couldn't determine — caller should treat this as "give up"
 }
 
@@ -921,6 +924,7 @@ async function getTodaysFirstWnbaId(){
     if(stored !== null){
       cachedFirstWnbaId = Number(stored);
       cachedFirstWnbaIdForDate = todayStr;
+      console.log(`[WNBA backfill] getTodaysFirstWnbaId() -> ${cachedFirstWnbaId} (from localStorage cache)`);
       return cachedFirstWnbaId;
     }
   } catch(e){ /* localStorage unavailable — ignore */ }
@@ -928,6 +932,7 @@ async function getTodaysFirstWnbaId(){
   if(todayStr === WNBA_ID_ANCHOR_DATE){
     cachedFirstWnbaId = WNBA_ID_ANCHOR_ID;
     cachedFirstWnbaIdForDate = todayStr;
+    console.log(`[WNBA backfill] getTodaysFirstWnbaId() -> ${cachedFirstWnbaId} (today is the anchor date)`);
     return cachedFirstWnbaId;
   }
 
@@ -937,7 +942,10 @@ async function getTodaysFirstWnbaId(){
 
   while(cursor < today){
     const count = await countEspnGamesOnDate(ymd(cursor));
-    if(count === null) return null; // can't compute reliably — caller falls back
+    if(count === null){
+      console.error(`[WNBA backfill] getTodaysFirstWnbaId() -> giving up, could not count games on ${ymd(cursor)}`);
+      return null; // can't compute reliably — caller falls back
+    }
     id += count;
     cursor.setDate(cursor.getDate() + 1);
   }
@@ -1038,28 +1046,48 @@ function parseIsoClockRemaining(iso){
 // doesn't pan out (ID drift, fetch failure, unexpected data shape).
 async function attemptWnbaBackfill(gid, away, home){
   const st = gameState[gid];
-  if(!st) return false;
+  if(!st){
+    console.error(`[WNBA backfill] ${gid}: no gameState found`);
+    return false;
+  }
 
   const firstId = await getTodaysFirstWnbaId();
-  if(firstId === null || st.wnbaGameIndex === undefined) return false;
+  if(firstId === null){
+    console.error(`[WNBA backfill] ${gid}: getTodaysFirstWnbaId() returned null, giving up`);
+    return false;
+  }
+  if(st.wnbaGameIndex === undefined){
+    console.error(`[WNBA backfill] ${gid}: wnbaGameIndex is undefined, giving up`);
+    return false;
+  }
 
   const wnbaId = firstId + st.wnbaGameIndex;
+  console.log(`[WNBA backfill] ${gid}: trying wnbaId=${wnbaId} (firstId=${firstId} + index=${st.wnbaGameIndex})`);
   const target = `https://cdn.wnba.com/static/json/liveData/playbyplay/playbyplay_${wnbaId}.json`;
   const attempts = [target, ...PROXIES.slice(0, 3).map(w => w(target))];
 
   for(const url of attempts){
     try{
       const res = await fetch(url, { cache: "no-store" });
-      if(!res.ok) continue;
+      if(!res.ok){
+        console.warn(`[WNBA backfill] ${gid}: ${shortUrl(url)} -> HTTP ${res.status}`);
+        continue;
+      }
       const data = await res.json();
 
-      if(gameState[gid] !== st) return false; // sheet was rebuilt mid-flight
+      if(gameState[gid] !== st){
+        console.warn(`[WNBA backfill] ${gid}: sheet was rebuilt mid-flight, aborting`);
+        return false;
+      }
 
       const game = data.game || {};
       // Sanity check: the returned game's own ID should match what we
       // requested — guards against a proxy/CDN quirk silently substituting
       // different content.
-      if(String(game.gameId) !== String(wnbaId)) continue;
+      if(String(game.gameId) !== String(wnbaId)){
+        console.warn(`[WNBA backfill] ${gid}: ${shortUrl(url)} -> gameId mismatch (got ${game.gameId}, expected ${wnbaId})`);
+        continue;
+      }
 
       const actions = game.actions || [];
       let candidate = null;
@@ -1071,7 +1099,11 @@ async function attemptWnbaBackfill(gid, away, home){
           candidate = a;
         }
       }
-      if(!candidate) continue;
+      if(!candidate){
+        console.warn(`[WNBA backfill] ${gid}: ${shortUrl(url)} -> matched game but no Q4 candidate found (${actions.length} total actions, game may not have reached Q4 yet)`);
+        continue;
+      }
+      console.log(`[WNBA backfill] ${gid}: SUCCESS via ${shortUrl(url)} -> away=${candidate.scoreAway} home=${candidate.scoreHome} at clock=${candidate.clock}`);
 
       const awayQ13 = away.q1 + away.q2 + away.q3;
       const homeQ13 = home.q1 + home.q2 + home.q3;
@@ -1085,9 +1117,10 @@ async function attemptWnbaBackfill(gid, away, home){
       recalcGame(gid);
       return true;
     } catch(e){
-      // try next attempt
+      console.warn(`[WNBA backfill] ${gid}: ${shortUrl(url)} -> threw: ${e.message || e}`);
     }
   }
+  console.error(`[WNBA backfill] ${gid}: all attempts exhausted, falling back to ESPN reconstruction`);
   return false;
 }
 
