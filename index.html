@@ -859,7 +859,6 @@ function scoreboardUrls(){
 // reports were played on each day in between.
 const WNBA_ID_ANCHOR_DATE = "20260730"; // YYYYMMDD
 const WNBA_ID_ANCHOR_ID = 1022600210;    // first game's ID on the anchor date
-const SCRAPINGBEE_KEY = "36R761SNLWNAW961VJ7NZTNSHGNQ5V6O58IVQH92TTVZSYQHMN9X5X5YYZ562W3IWD8OQIN6848FHNOK";
 
 function parseYmd(ymdStr){
   const y = Number(ymdStr.slice(0,4));
@@ -1002,23 +1001,23 @@ async function backfillQ4Snapshot(gid, away, home){
   st.backfillAttempted = false;
 }
 
-// Loose team-name check: does this WNBA.com page actually mention the team
-// we expect? Guards against a drifted/wrong game ID silently feeding in
-// another game's score. Checks the last word of the team name (usually the
-// nickname, e.g. "Sun", "Sky", "Mystics") since that's what's most likely to
-// appear verbatim in headers/labels on the page.
-function pageMentionsTeam(pageText, teamName){
-  const words = teamName.trim().split(/\s+/);
-  const nickname = words[words.length - 1];
-  if(!nickname || nickname.length < 3) return true; // too short to check meaningfully, don't block on it
-  return pageText.toLowerCase().includes(nickname.toLowerCase());
+function parseIsoClockRemaining(iso){
+  // WNBA.com's playbyplay JSON uses ISO 8601 duration format, e.g. "PT05M27.00S"
+  if(!iso) return null;
+  const m = iso.match(/PT(\d+)M([\d.]+)S/);
+  if(!m) return null;
+  const minutes = parseInt(m[1], 10);
+  const seconds = parseFloat(m[2]);
+  if(isNaN(minutes) || isNaN(seconds)) return null;
+  return minutes + seconds / 60;
 }
 
-// Tries to get the precise Q4 5:00-mark score from WNBA.com's play-by-play
-// (via ScrapingBee, since the page is client-rendered), using the game ID
-// derived from the anchor-based counter. This is the precise source — ESPN's
-// scoringPlays reconstruction is only a fallback if this doesn't pan out
-// (ID drift, ScrapingBee failure, page structure not matching what we expect).
+// Tries to get the precise Q4 5:00-mark score from WNBA.com's own static
+// play-by-play JSON (cdn.wnba.com — same public CDN family as their
+// scoreboard feed, no headless-browser rendering needed at all), using the
+// game ID derived from the anchor-based counter. This is the precise
+// source — ESPN's scoringPlays reconstruction is only a fallback if this
+// doesn't pan out (ID drift, fetch failure, unexpected data shape).
 async function attemptWnbaBackfill(gid, away, home){
   const st = gameState[gid];
   if(!st) return false;
@@ -1027,58 +1026,51 @@ async function attemptWnbaBackfill(gid, away, home){
   if(firstId === null || st.wnbaGameIndex === undefined) return false;
 
   const wnbaId = firstId + st.wnbaGameIndex;
-  const target = `https://www.wnba.com/game/${wnbaId}/play-by-play?period=Q4`;
-  const url = `https://app.scrapingbee.com/api/v1/?api_key=${SCRAPINGBEE_KEY}&url=${encodeURIComponent(target)}&render_js=true`;
+  const target = `https://cdn.wnba.com/static/json/liveData/playbyplay/playbyplay_${wnbaId}.json`;
+  const attempts = [target, ...PROXIES.slice(0, 3).map(w => w(target))];
 
-  try{
-    const res = await fetch(url, { cache: "no-store" });
-    if(!res.ok) return false;
-    const html = await res.text();
+  for(const url of attempts){
+    try{
+      const res = await fetch(url, { cache: "no-store" });
+      if(!res.ok) continue;
+      const data = await res.json();
 
-    if(gameState[gid] !== st) return false; // sheet was rebuilt mid-flight
+      if(gameState[gid] !== st) return false; // sheet was rebuilt mid-flight
 
-    const doc = new DOMParser().parseFromString(html, "text/html");
-    const text = doc.body ? doc.body.textContent : "";
-    if(!text) return false;
+      const game = data.game || {};
+      // Sanity check: the returned game's own ID should match what we
+      // requested — guards against a proxy/CDN quirk silently substituting
+      // different content.
+      if(String(game.gameId) !== String(wnbaId)) continue;
 
-    // Safety check: bail if this page doesn't even mention both expected
-    // teams — a sign the ID has drifted onto the wrong game.
-    if(!pageMentionsTeam(text, away.name) || !pageMentionsTeam(text, home.name)){
-      return false;
-    }
-
-    // Scan for every (clock, score) pair. WNBA.com's flattened text renders
-    // these as e.g. "05:2774 - 76" — clock immediately followed by the
-    // score if one changed on that play, nothing after it otherwise.
-    const re = /(\d{1,2}:\d{2})(\d{1,3}\s*-\s*\d{1,3})?/g;
-    let match;
-    let lastAtOrAboveFive = null;
-    while((match = re.exec(text)) !== null){
-      const remaining = parseClockRemaining(match[1]);
-      if(remaining === null) continue;
-      if(match[2] && remaining >= 5){
-        lastAtOrAboveFive = match[2];
+      const actions = game.actions || [];
+      let candidate = null;
+      for(const a of actions){
+        if(a.period !== 4) continue;
+        const remaining = parseIsoClockRemaining(a.clock);
+        if(remaining === null) continue;
+        if(remaining >= 5 && typeof a.scoreHome === "string" && typeof a.scoreAway === "string"){
+          candidate = a;
+        }
       }
+      if(!candidate) continue;
+
+      const awayQ13 = away.q1 + away.q2 + away.q3;
+      const homeQ13 = home.q1 + home.q2 + home.q3;
+      st.q4Snapshot.away = Number(candidate.scoreAway) - awayQ13;
+      st.q4Snapshot.home = Number(candidate.scoreHome) - homeQ13;
+
+      const f2El = eg(gid, "F2");
+      const f3El = eg(gid, "F3");
+      if(f2El) f2El.value = st.q4Snapshot.away;
+      if(f3El) f3El.value = st.q4Snapshot.home;
+      recalcGame(gid);
+      return true;
+    } catch(e){
+      // try next attempt
     }
-    if(!lastAtOrAboveFive) return false;
-
-    const parts = lastAtOrAboveFive.split("-").map(s => Number(s.trim()));
-    if(parts.length !== 2 || isNaN(parts[0]) || isNaN(parts[1])) return false;
-
-    const awayQ13 = away.q1 + away.q2 + away.q3;
-    const homeQ13 = home.q1 + home.q2 + home.q3;
-    st.q4Snapshot.away = parts[0] - awayQ13;
-    st.q4Snapshot.home = parts[1] - homeQ13;
-
-    const f2El = eg(gid, "F2");
-    const f3El = eg(gid, "F3");
-    if(f2El) f2El.value = st.q4Snapshot.away;
-    if(f3El) f3El.value = st.q4Snapshot.home;
-    recalcGame(gid);
-    return true;
-  } catch(e){
-    return false;
   }
+  return false;
 }
 
 // Tries the precise WNBA.com source first; falls back to the ESPN
