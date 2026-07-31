@@ -206,7 +206,11 @@
     gap:2px;
   }
   .k5{
-    width:52px;
+    display:inline-block !important;
+    width:52px !important;
+    max-width:52px;
+    flex:0 0 auto;
+    margin:0 !important;
     border:1px solid #c7cad0;
     border-radius:3px;
     text-align:center;
@@ -215,6 +219,7 @@
     font-family:inherit;
   }
   .k5-suffix{
+    flex:0 0 auto;
     font-size:11px;
     font-weight:600;
     color:#3c4043;
@@ -571,7 +576,7 @@ function enableManualFallbackBlock(){
   recalcGame("manual");
 }
 
-// Rebuilds K5's dropdown to list whole numbers from (I5-10) to (I5+10),
+// Rebuilds K5's dropdown to list whole numbers from (I5-20) to (I5+20),
 // floored at 0 so it never goes negative. Each option is just the integer —
 // the ".5" is a fixed suffix next to the dropdown, not part of the list.
 // Only touches the DOM when the range actually changed, and applies any
@@ -581,8 +586,8 @@ function rebuildK5Options(gid, I5){
   const el = eg(gid, "K5");
   const st = gameState[gid];
 
-  let min = I5 - 10;
-  const max = I5 + 10;
+  let min = I5 - 20;
+  const max = I5 + 20;
   if(min < 0) min = 0;
 
   const key = `${min}:${max}`;
@@ -703,24 +708,27 @@ function recalcGame(gid){
   const L5 = K5 === null ? "–" : fmt(Math.abs(K5 - I5), 1);
   eg(gid,"L5").textContent = L5;
 
-  // M5 (Suggested Pick) — revised logic:
-  // Stay blank until this game has actually reached the Q4 5-minute freeze
-  // point (a real "we're late enough to trust the projection" gate — the
-  // old ISBLANK(F2) check no longer meant that, since F2 now mirrors live
-  // scoring from Q1 onward). Once unlocked, compare the sheet's own
-  // blended full-game projection (G5) directly against the entered line
-  // (K5) — this replaces the old M3-driven logic, which almost always
-  // resolved the pick before ever reaching the G5/K5 comparison.
-  const q4Locked = st.q4Snapshot && st.q4Snapshot.away !== null;
+  // M5 (Suggested Pick) — reverted back to the original M3-driven formula:
+  // IF(OR(ISBLANK(F2),ISBLANK(F3)),"",
+  //   IF(M3="Above Avg","Under",
+  //   IF(M3="Below Avg","Over",
+  //   IF(F4<=15,"Over",
+  //   IF(K5>G5,"Over","Under")))))
+  const f2Blank = eg(gid,"F2").value === "";
+  const f3Blank = eg(gid,"F3").value === "";
   let M5;
-  if(!q4Locked || K5 === null){
+  if(f2Blank || f3Blank){
     M5 = "";
-  } else if(G5 > K5){
-    M5 = "Over";
-  } else if(G5 < K5){
+  } else if(M3 === "Above Avg"){
     M5 = "Under";
+  } else if(M3 === "Below Avg"){
+    M5 = "Over";
+  } else if(F4 <= 15){
+    M5 = "Over";
+  } else if(K5 !== null && K5 > G5){
+    M5 = "Over";
   } else {
-    M5 = "";
+    M5 = "Under";
   }
   eg(gid,"M5").textContent = M5 === "" ? "–" : M5;
 
