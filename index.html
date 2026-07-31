@@ -546,9 +546,10 @@ function ensureGameBlock(gid){
   });
 
   // J4 (pre-game odds) isn't a user input — restore its last known value on
-  // reload so it doesn't blank out to "–" while waiting for the next odds
-  // fetch. Whether it keeps updating from here depends on the game's actual
-  // state, handled in applyOddsData.
+  // reload so it doesn't blank out to "–" while waiting for the next score
+  // fetch (odds now come bundled in that same fetch). Whether it keeps
+  // updating from here depends on the game's actual state, handled in
+  // applyGameData.
   const savedJ4 = loadField(gid, "J4");
   if(savedJ4 !== null){
     eg(gid, "J4").textContent = savedJ4;
@@ -719,7 +720,7 @@ function recalcGame(gid){
   l5El.classList.add(pickWinning ? "grand-total" : "pred-total");
 }
 
-function applyGameData(gid, away, home, status){
+function applyGameData(gid, away, home, status, overUnder){
   ensureGameBlock(gid);
   const st = gameState[gid];
 
@@ -804,6 +805,23 @@ function applyGameData(gid, away, home, status){
     statusText = "Final";
   }
   eg(gid,"matchup").textContent = `${away.name} @ ${home.name} — ${statusText}`;
+
+  // K4/J4: ESPN embeds the betting total directly in the same payload we
+  // already poll for scores — no separate odds API/key/quota needed. K4
+  // always reflects the latest value; J4 keeps updating while the game is
+  // still pre-game, then freezes automatically once it goes live, same
+  // logic as before.
+  if(typeof overUnder === "number"){
+    const k4El = eg(gid, "K4");
+    if(k4El) k4El.textContent = fmt(overUnder, 1);
+
+    if(state === "pre"){
+      const j4El = eg(gid, "J4");
+      const j4Text = fmt(overUnder, 1);
+      if(j4El) j4El.textContent = j4Text;
+      saveField(gid, "J4", j4Text);
+    }
+  }
 
   recalcGame(gid);
 }
@@ -1120,12 +1138,18 @@ function parseEvent(ev){
   const clock = state === "in" ? (statusBlock.displayClock || null) : null;
   const detail = type.detail || type.shortDetail || null;
 
+  // ESPN embeds betting odds (spread, moneyline, total) directly in this
+  // same scoreboard payload when available — no separate odds API needed.
+  const oddsBlock = (comp.odds && comp.odds[0]) || null;
+  const overUnder = oddsBlock && typeof oddsBlock.overUnder === "number" ? oddsBlock.overUnder : null;
+
   return {
     id: ev.id,
     date: ev.date,
     away: toTeam(awayC),
     home: toTeam(homeC),
-    status: { period, clock, state, detail }
+    status: { period, clock, state, detail },
+    overUnder
   };
 }
 
@@ -1178,11 +1202,15 @@ async function fetchScores(){
 
     for(const g of parsedList){
       const gid = "g" + g.id;
-      applyGameData(gid, g.away, g.home, g.status);
-      // Sequential position among today's games, in the same chronological
-      // order ESPN/our sheet already uses — this is what lets us derive the
-      // expected WNBA.com game ID (firstId + index) for the backfill source.
+      // Must set wnbaGameIndex BEFORE applyGameData runs — applyGameData is
+      // what triggers the Q4 backfill internally, and that backfill needs
+      // this index to compute the WNBA.com game ID. Setting it after was a
+      // real bug: the first backfill attempt for any game would always find
+      // this undefined, silently fall back to the less-precise ESPN source,
+      // and then never retry since the fallback already "succeeded".
+      ensureGameBlock(gid); // safe no-op if the block already exists
       gameState[gid].wnbaGameIndex = parsedList.indexOf(g);
+      applyGameData(gid, g.away, g.home, g.status, g.overUnder);
     }
 
     $("lastUpdated").textContent = new Date().toLocaleTimeString();
@@ -1238,81 +1266,14 @@ function stopAutoRefresh(){
   currentIntervalMs = null;
 }
 
-// --- Live over/under totals (The Odds API) ---
-// One request covers every WNBA game at once, so this runs on its own,
-// much slower interval than the 5s score poll — the free tier's monthly
-// quota is small, and a total line doesn't need second-by-second updates.
-const ODDS_API_KEY = "ecdf4518525ce739eaf155ce5c0f8f49";
-const ODDS_API_URL = `https://api.the-odds-api.com/v4/sports/basketball_wnba/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=totals`;
-
-function normalizeTeamName(name){
-  return (name || "").toLowerCase().trim();
-}
-
-function extractTotalPoint(game){
-  for(const bk of (game.bookmakers || [])){
-    const totals = (bk.markets || []).find(m => m.key === "totals");
-    if(totals && Array.isArray(totals.outcomes)){
-      const withPoint = totals.outcomes.find(o => typeof o.point === "number");
-      if(withPoint) return withPoint.point;
-    }
-  }
-  return null;
-}
-
-function applyOddsData(games){
-  for(const g of games){
-    const point = extractTotalPoint(g);
-    if(point === null) continue;
-    const away = normalizeTeamName(g.away_team);
-    const home = normalizeTeamName(g.home_team);
-
-    for(const gid of Object.keys(gameState)){
-      const awayEl = document.getElementById(`${gid}-awayName`);
-      const homeEl = document.getElementById(`${gid}-homeName`);
-      const k4El = document.getElementById(`${gid}-K4`);
-      const j4El = document.getElementById(`${gid}-J4`);
-      if(!awayEl || !homeEl || !k4El) continue;
-      if(normalizeTeamName(awayEl.textContent) === away && normalizeTeamName(homeEl.textContent) === home){
-        k4El.textContent = fmt(point, 1);
-
-        // J4 = pre-game odds. Keeps updating with the latest line on every
-        // odds fetch as long as the game hasn't started yet, then freezes
-        // automatically the moment its real state stops being "pre".
-        const st = gameState[gid];
-        if(j4El && st && st.lastState === "pre"){
-          const j4Text = fmt(point, 1);
-          j4El.textContent = j4Text;
-          saveField(gid, "J4", j4Text);
-        }
-      }
-    }
-  }
-}
-
-async function fetchOdds(){
-  const attempts = [ODDS_API_URL, PROXIES[0](ODDS_API_URL), PROXIES[1](ODDS_API_URL), PROXIES[2](ODDS_API_URL)];
-  for(const url of attempts){
-    try{
-      const res = await fetch(url, { cache: "no-store" });
-      if(res.status === 401){ console.error("Odds API: invalid key"); return; }
-      if(res.status === 429){ console.error("Odds API: rate limit / quota exceeded"); return; }
-      if(!res.ok) continue;
-      const data = await res.json();
-      applyOddsData(data);
-      return;
-    } catch(e){
-      // try next
-    }
-  }
-}
+// --- Live over/under totals ---
+// ESPN embeds betting odds directly in the same scoreboard payload we
+// already poll every 5s for scores (parsed in parseEvent, applied in
+// applyGameData) — no separate odds API/key/polling loop needed at all.
 
 $("refreshBtn").addEventListener("click", fetchScores);
 
 fetchScores();
-
-fetchOdds();
-setInterval(fetchOdds, 60000);
 </script>
 </body>
 </html>
