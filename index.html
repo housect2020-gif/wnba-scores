@@ -514,7 +514,8 @@ function makeGameRowsHtml(gid){
         </select>
       </td>
       <td class="k5-cell">
-        <select class="k5" id="${gid}-K5"><option value="">–</option></select>
+        <input type="number" inputmode="numeric" class="k5" id="${gid}-K5" list="${gid}-K5list" placeholder="0" autocomplete="off">
+        <datalist id="${gid}-K5list"></datalist>
         <span class="k5-suffix">.5</span>
       </td>
       <td class="formula" id="${gid}-L5">–</td>
@@ -528,26 +529,18 @@ function ensureGameBlock(gid){
   if(gameState[gid]) return;
   gameState[gid] = { q4Snapshot: { away: null, home: null }, backfillAttempted: false, lastState: "pre" };
   $("gamesBody").insertAdjacentHTML("beforeend", makeGameRowsHtml(gid));
-  ["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3"].forEach(suffix=>{
+  ["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3","K5"].forEach(suffix=>{
     eg(gid, suffix).addEventListener("input", ()=>recalcGame(gid));
   });
   eg(gid, "J5").addEventListener("change", ()=>recalcGame(gid));
   eg(gid, "J3").addEventListener("change", ()=>recalcGame(gid));
-  eg(gid, "K5").addEventListener("change", ()=>recalcGame(gid));
 
   // Persist the user's own entries (K5 odds, J5 pick, J3 minutes) so they
   // stick across page reloads/refreshes on this browser until changed again.
-  // K5's options don't exist yet at block-creation time (built dynamically
-  // in rebuildK5Options once I5 is known), so its restore is deferred via
-  // pendingK5Restore and applied on the first options build instead.
   ["K5","J5","J3"].forEach(suffix=>{
     const elx = eg(gid, suffix);
     const saved = loadField(gid, suffix);
-    if(suffix === "K5"){
-      if(saved !== null) gameState[gid].pendingK5Restore = saved;
-    } else if(saved !== null){
-      elx.value = saved;
-    }
+    if(saved !== null) elx.value = saved;
     const evt = elx.tagName === "SELECT" ? "change" : "input";
     elx.addEventListener(evt, ()=> saveField(gid, suffix, elx.value));
   });
@@ -576,46 +569,29 @@ function enableManualFallbackBlock(){
   recalcGame("manual");
 }
 
-// Rebuilds K5's dropdown to list whole numbers from (I5-20) to (I5+20),
-// floored at 0 so it never goes negative. Each option is just the integer —
-// the ".5" is a fixed suffix next to the dropdown, not part of the list.
-// Only touches the DOM when the range actually changed, and applies any
-// pending localStorage-restored value on the first build (options don't
-// exist yet at block-creation time, so that restore has to happen here).
+// Rebuilds K5's suggested-values list (via <datalist>) to span (I5-20) to
+// (I5+20), floored at 0. These are only suggestions — K5 is a free-typing
+// field, so any whole number can still be entered manually regardless of
+// what's listed here. The ".5" is a fixed suffix next to the field, not
+// part of what's typed or listed. Only touches the DOM when the range
+// actually changed, so it doesn't disrupt an open dropdown mid-poll.
 function rebuildK5Options(gid, I5){
-  const el = eg(gid, "K5");
-  const st = gameState[gid];
+  const listEl = document.getElementById(`${gid}-K5list`);
+  if(!listEl) return;
 
   let min = I5 - 20;
   const max = I5 + 20;
   if(min < 0) min = 0;
 
   const key = `${min}:${max}`;
-  if(el.dataset.rangeKey === key) return;
-  el.dataset.rangeKey = key;
+  if(listEl.dataset.rangeKey === key) return;
+  listEl.dataset.rangeKey = key;
 
-  const prevValue = el.value;
-
-  let html = '<option value="">–</option>';
-  const values = [];
+  let html = "";
   for(let v = min; v <= max; v++){
-    values.push(v);
-    html += `<option value="${v}">${v}</option>`;
+    html += `<option value="${v}">`;
   }
-  el.innerHTML = html;
-
-  if(st && st.pendingK5Restore !== undefined && st.pendingK5Restore !== null){
-    const restore = st.pendingK5Restore;
-    if(values.some(v => String(v) === String(restore))){
-      el.value = restore;
-    }
-    delete st.pendingK5Restore;
-    return;
-  }
-
-  if(prevValue !== "" && values.some(v => String(v) === prevValue)){
-    el.value = prevValue;
-  }
+  listEl.innerHTML = html;
 }
 
 function recalcGame(gid){
