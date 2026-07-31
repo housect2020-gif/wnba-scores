@@ -199,17 +199,25 @@
     text-align:center !important;
     text-align-last:center;
   }
+  .k5-cell{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:2px;
+  }
   .k5{
-    width:100%;
-    max-width:60px;
+    width:52px;
     border:1px solid #c7cad0;
     border-radius:3px;
     text-align:center;
     font-size:11px;
     padding:2px 1px;
     font-family:inherit;
-    margin:0 auto;
-    display:block;
+  }
+  .k5-suffix{
+    font-size:11px;
+    font-weight:600;
+    color:#3c4043;
   }
   .footer{
     margin-top:12px;
@@ -500,9 +508,9 @@ function makeGameRowsHtml(gid){
           <option value="Over">Over</option>
         </select>
       </td>
-      <td>
-        <input type="text" inputmode="decimal" class="k5" id="${gid}-K5" list="${gid}-K5list" placeholder="0.0" autocomplete="off">
-        <datalist id="${gid}-K5list"></datalist>
+      <td class="k5-cell">
+        <select class="k5" id="${gid}-K5"><option value="">–</option></select>
+        <span class="k5-suffix">.5</span>
       </td>
       <td class="formula" id="${gid}-L5">–</td>
       <td class="formula" id="${gid}-M5">–</td>
@@ -515,24 +523,26 @@ function ensureGameBlock(gid){
   if(gameState[gid]) return;
   gameState[gid] = { q4Snapshot: { away: null, home: null }, backfillAttempted: false, lastState: "pre" };
   $("gamesBody").insertAdjacentHTML("beforeend", makeGameRowsHtml(gid));
-  ["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3","K5"].forEach(suffix=>{
+  ["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3"].forEach(suffix=>{
     eg(gid, suffix).addEventListener("input", ()=>recalcGame(gid));
   });
   eg(gid, "J5").addEventListener("change", ()=>recalcGame(gid));
   eg(gid, "J3").addEventListener("change", ()=>recalcGame(gid));
-
-  // K5 can be typed freely (not locked to the dropdown/range), but once you
-  // finish editing (blur/enter), it snaps to the nearest value ending in
-  // .5 — e.g. typing "160" becomes "160.5". No range clamping here, only
-  // the half-point rounding.
-  eg(gid, "K5").addEventListener("change", ()=> snapK5(gid));
+  eg(gid, "K5").addEventListener("change", ()=>recalcGame(gid));
 
   // Persist the user's own entries (K5 odds, J5 pick, J3 minutes) so they
   // stick across page reloads/refreshes on this browser until changed again.
+  // K5's options don't exist yet at block-creation time (built dynamically
+  // in rebuildK5Options once I5 is known), so its restore is deferred via
+  // pendingK5Restore and applied on the first options build instead.
   ["K5","J5","J3"].forEach(suffix=>{
     const elx = eg(gid, suffix);
     const saved = loadField(gid, suffix);
-    if(saved !== null) elx.value = saved;
+    if(suffix === "K5"){
+      if(saved !== null) gameState[gid].pendingK5Restore = saved;
+    } else if(saved !== null){
+      elx.value = saved;
+    }
     const evt = elx.tagName === "SELECT" ? "change" : "input";
     elx.addEventListener(evt, ()=> saveField(gid, suffix, elx.value));
   });
@@ -561,53 +571,46 @@ function enableManualFallbackBlock(){
   recalcGame("manual");
 }
 
-// Rebuilds K5's dropdown options to span the live +/-20 range around the
-// current total (floored at 0.5 — a total-points line can't be zero or
-// negative). Only touches the DOM when the actual range has changed, so it
-// doesn't disrupt an open dropdown on every 5s poll. Preserves whatever the
-// user currently has selected if it's still valid in the new range, or
-// applies a pending restored-from-localStorage value on first build.
-// Rebuilds K5's suggested-values list (via <datalist>) to span the live
-// +/-20 range around the current total, floored at 0.5. This only offers
-// suggestions — K5 remains a free-text field, so any value can still be
-// typed manually regardless of what's listed here.
-// Snaps K5 to the nearest value ending in .5 once the user finishes typing
-// (blur/enter, not every keystroke). No range clamping — you can type
-// anything, it just always lands on a half-point. e.g. "160" -> "160.5",
-// "158.2" -> "158.5", "159.8" -> "159.5".
-function snapK5(gid){
-  const el = eg(gid, "K5");
-  if(el.value.trim() === ""){ recalcGame(gid); return; }
-
-  const v = Number(el.value);
-  if(isNaN(v)){ recalcGame(gid); return; } // leave non-numeric entries alone
-
-  const snapped = Math.round(v - 0.5) + 0.5;
-  el.value = snapped.toFixed(1);
-  saveField(gid, "K5", el.value);
-  recalcGame(gid);
-}
-
+// Rebuilds K5's dropdown to list whole numbers from (I5-10) to (I5+10),
+// floored at 0 so it never goes negative. Each option is just the integer —
+// the ".5" is a fixed suffix next to the dropdown, not part of the list.
+// Only touches the DOM when the range actually changed, and applies any
+// pending localStorage-restored value on the first build (options don't
+// exist yet at block-creation time, so that restore has to happen here).
 function rebuildK5Options(gid, I5){
-  const listEl = document.getElementById(`${gid}-K5list`);
-  if(!listEl) return;
+  const el = eg(gid, "K5");
+  const st = gameState[gid];
 
-  let center = I5 + 0.5;
-  let min = center - 20;
-  const max = center + 20;
-  if(min < 0.5) min = 0.5; // never go zero or negative
+  let min = I5 - 10;
+  const max = I5 + 10;
+  if(min < 0) min = 0;
 
-  const count = Math.round((max - min) / 1);
   const key = `${min}:${max}`;
-  if(listEl.dataset.rangeKey === key) return; // range unchanged, nothing to rebuild
-  listEl.dataset.rangeKey = key;
+  if(el.dataset.rangeKey === key) return;
+  el.dataset.rangeKey = key;
 
-  let html = "";
-  for(let i = 0; i <= count; i++){
-    const v = min + i * 1;
-    html += `<option value="${v.toFixed(1)}">`;
+  const prevValue = el.value;
+
+  let html = '<option value="">–</option>';
+  const values = [];
+  for(let v = min; v <= max; v++){
+    values.push(v);
+    html += `<option value="${v}">${v}</option>`;
   }
-  listEl.innerHTML = html;
+  el.innerHTML = html;
+
+  if(st && st.pendingK5Restore !== undefined && st.pendingK5Restore !== null){
+    const restore = st.pendingK5Restore;
+    if(values.some(v => String(v) === String(restore))){
+      el.value = restore;
+    }
+    delete st.pendingK5Restore;
+    return;
+  }
+
+  if(prevValue !== "" && values.some(v => String(v) === prevValue)){
+    el.value = prevValue;
+  }
 }
 
 function recalcGame(gid){
@@ -678,10 +681,6 @@ function recalcGame(gid){
   eg(gid,"F5").textContent = fmt(F5);
   eg(gid,"G5").textContent = fmt(G5);
   eg(gid,"I5").textContent = fmt(I5);
-
-  // K5 dropdown: always centered on the nearest half-point above the
-  // current live total (I5 is always a whole number), spanning +/-20
-  // either side, floored at 0.5. e.g. I5=160 -> 140.5 to 180.5.
   rebuildK5Options(gid, I5);
 
   // M3
@@ -696,7 +695,8 @@ function recalcGame(gid){
   }
   eg(gid,"M3").textContent = M3 === "" ? "–" : M3;
 
-  const K5 = eg(gid,"K5").value === "" ? null : Number(eg(gid,"K5").value);
+  const k5Raw = eg(gid,"K5").value;
+  const K5 = k5Raw === "" ? null : Number(k5Raw) + 0.5;
   const L3 = K5 === null ? "–" : fmt(Math.abs(sumQ13 - K5), 1);
   eg(gid,"L3").textContent = L3;
 
