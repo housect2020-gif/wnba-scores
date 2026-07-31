@@ -813,6 +813,8 @@ const SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball
 const PROXIES = [
   url => "https://corsproxy.io/?url=" + encodeURIComponent(url),
   url => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
+  url => "https://api.codetabs.com/v1/proxy/?quest=" + encodeURIComponent(url),
+  url => "https://cors.x2u.in/" + url,
   url => "https://thingproxy.freeboard.io/fetch/" + url,
   url => url
 ];
@@ -1092,6 +1094,8 @@ async function runQ4Backfill(gid, away, home){
 function shortUrl(url){
   if(url.includes("corsproxy.io")) return "corsproxy.io";
   if(url.includes("allorigins")) return "allorigins.win";
+  if(url.includes("codetabs")) return "codetabs.com";
+  if(url.includes("cors.x2u.in")) return "cors.x2u.in";
   if(url.includes("thingproxy")) return "thingproxy";
   return "direct";
 }
@@ -1295,7 +1299,7 @@ function applyOddsData(games){
 }
 
 async function fetchOdds(){
-  const attempts = [ODDS_API_URL, PROXIES[0](ODDS_API_URL), PROXIES[1](ODDS_API_URL)];
+  const attempts = [ODDS_API_URL, PROXIES[0](ODDS_API_URL), PROXIES[1](ODDS_API_URL), PROXIES[2](ODDS_API_URL)];
   for(const url of attempts){
     try{
       const res = await fetch(url, { cache: "no-store" });
