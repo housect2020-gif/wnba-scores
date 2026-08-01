@@ -224,6 +224,38 @@
     font-weight:600;
     color:#3c4043;
   }
+  .k5-wrap{
+    position:relative;
+    display:inline-block;
+    flex:0 0 auto;
+  }
+  .k5-dropdown{
+    display:none;
+    position:absolute;
+    top:100%;
+    left:0;
+    z-index:50;
+    background:#fff;
+    border:1px solid #c7cad0;
+    border-radius:3px;
+    max-height:160px;
+    overflow-y:auto;
+    min-width:52px;
+    box-shadow:0 2px 6px rgba(0,0,0,0.18);
+  }
+  .k5-dropdown.open{
+    display:block;
+  }
+  .k5-option{
+    padding:3px 8px;
+    font-size:11px;
+    cursor:pointer;
+    white-space:nowrap;
+    text-align:center;
+  }
+  .k5-option:hover, .k5-option.active{
+    background:#e8f0fe;
+  }
   .footer{
     margin-top:12px;
     font-size:11.5px;
@@ -514,8 +546,10 @@ function makeGameRowsHtml(gid){
         </select>
       </td>
       <td class="k5-cell">
-        <input type="text" inputmode="numeric" pattern="[0-9]*" class="k5" id="${gid}-K5" list="${gid}-K5list" placeholder="0" autocomplete="off">
-        <datalist id="${gid}-K5list"></datalist>
+        <div class="k5-wrap">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" class="k5" id="${gid}-K5" placeholder="0" autocomplete="off">
+          <div class="k5-dropdown" id="${gid}-K5dropdown"></div>
+        </div>
         <span class="k5-suffix">.5</span>
       </td>
       <td class="formula" id="${gid}-L5">–</td>
@@ -554,6 +588,24 @@ function ensureGameBlock(gid){
   if(savedJ4 !== null){
     eg(gid, "J4").textContent = savedJ4;
   }
+
+  // Custom K5 dropdown wiring (see renderK5Dropdown/selectK5Value/
+  // closeK5Dropdown above for why this replaced the native <datalist>).
+  const k5Input = eg(gid, "K5");
+  const k5Drop = document.getElementById(`${gid}-K5dropdown`);
+  k5Input.addEventListener("focus", ()=> renderK5Dropdown(gid));
+  k5Input.addEventListener("input", ()=> renderK5Dropdown(gid));
+  // A short delay on blur lets the dropdown's own mousedown handler (below)
+  // register the click before the dropdown gets torn down — without it,
+  // blur fires first and the click never reaches the option.
+  k5Input.addEventListener("blur", ()=> setTimeout(()=> closeK5Dropdown(gid), 150));
+  if(k5Drop){
+    k5Drop.addEventListener("mousedown", (e)=>{
+      e.preventDefault(); // keep focus on the input so blur doesn't fire early
+      const opt = e.target.closest(".k5-option");
+      if(opt) selectK5Value(gid, opt.dataset.value);
+    });
+  }
 }
 
 function enableManualFallbackBlock(){
@@ -570,31 +622,69 @@ function enableManualFallbackBlock(){
   recalcGame("manual");
 }
 
-// Rebuilds K5's suggested-values list (via <datalist>) to span (center-20)
-// to (center+20), floored at 0. `center` is the market total when ESPN
-// provides one, else the live running total as a fallback — see the call
-// site in recalcGame. These are only suggestions — K5 is a free-typing
-// field, so any whole number can still be entered manually regardless of
-// what's listed here. The ".5" is a fixed suffix next to the field, not
-// part of what's typed or listed. Only touches the DOM when the range
-// actually changed, so it doesn't disrupt an open dropdown mid-poll.
+// Rebuilds the set of K5 suggested values (center-20 to center+20, floored
+// at 0). `center` is the market total when ESPN provides one, else the
+// live running total as a fallback — see the call site in recalcGame.
+// Stored on gameState rather than written into a native <datalist>: Chrome
+// closes a datalist's popup as soon as the typed text exactly matches one
+// of its own option values (there's nothing left to "complete"), which
+// made the suggestions disappear right when picking a value that WAS in
+// the list — the opposite of useful. A small custom dropdown (see
+// renderK5Dropdown/selectK5Value below) sidesteps that entirely since we
+// control exactly when it opens and closes.
 function rebuildK5Options(gid, center){
-  const listEl = document.getElementById(`${gid}-K5list`);
-  if(!listEl) return;
+  const st = gameState[gid];
+  if(!st) return;
 
   let min = center - 20;
   const max = center + 20;
   if(min < 0) min = 0;
 
   const key = `${min}:${max}`;
-  if(listEl.dataset.rangeKey === key) return;
-  listEl.dataset.rangeKey = key;
+  if(st.k5RangeKey === key) return;
+  st.k5RangeKey = key;
 
-  let html = "";
-  for(let v = min; v <= max; v++){
-    html += `<option value="${v}">`;
+  const values = [];
+  for(let v = min; v <= max; v++) values.push(v);
+  st.k5Options = values;
+}
+
+// Shows/filters the custom K5 dropdown based on what's currently typed —
+// matches by prefix (typing "17" shows 170-179 etc. from the suggested
+// range), or shows the full range when the field is empty.
+function renderK5Dropdown(gid){
+  const st = gameState[gid];
+  const inputEl = eg(gid, "K5");
+  const dropEl = document.getElementById(`${gid}-K5dropdown`);
+  if(!st || !st.k5Options || !inputEl || !dropEl) return;
+
+  const typed = inputEl.value.trim();
+  const matches = typed === "" ? st.k5Options : st.k5Options.filter(v => String(v).startsWith(typed));
+
+  if(matches.length === 0){
+    dropEl.classList.remove("open");
+    dropEl.innerHTML = "";
+    return;
   }
-  listEl.innerHTML = html;
+  dropEl.innerHTML = matches.map(v => `<div class="k5-option" data-value="${v}">${v}</div>`).join("");
+  dropEl.classList.add("open");
+}
+
+function closeK5Dropdown(gid){
+  const dropEl = document.getElementById(`${gid}-K5dropdown`);
+  if(dropEl){
+    dropEl.classList.remove("open");
+    dropEl.innerHTML = "";
+  }
+}
+
+function selectK5Value(gid, value){
+  const inputEl = eg(gid, "K5");
+  if(!inputEl) return;
+  inputEl.value = value;
+  closeK5Dropdown(gid);
+  recalcGame(gid);
+  saveField(gid, "K5", inputEl.value);
 }
 
 function recalcGame(gid){
