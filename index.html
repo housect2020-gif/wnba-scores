@@ -882,12 +882,15 @@ async function backfillQ4Snapshot(gid, away, home){
   const homeQ13 = home.q1 + home.q2 + home.q3;
 
   for(const wrap of PROXIES){
+    const bust = `_=${Date.now()}`;
+    const sep = summaryTarget.includes("?") ? "&" : "?";
+    const url = wrap(summaryTarget + sep + bust);
     try{
-      const bust = `_=${Date.now()}`;
-      const sep = summaryTarget.includes("?") ? "&" : "?";
-      const url = wrap(summaryTarget + sep + bust);
       const res = await fetch(url, { cache: "no-store" });
-      if(!res.ok) continue;
+      if(!res.ok){
+        console.warn(`[Q4 backfill] ${gid}: ${shortUrl(url)} -> HTTP ${res.status}`);
+        continue;
+      }
       const data = await res.json();
       // NOTE: ESPN's summary payload does NOT reliably populate
       // `scoringPlays` — confirmed via debug logging on the companion
@@ -911,20 +914,32 @@ async function backfillQ4Snapshot(gid, away, home){
         if(per !== 4) continue;
         const remaining = parseClockRemaining(p.clock && p.clock.displayValue);
         if(remaining === null) continue;
-        if(remaining >= 5) candidate = p;
+        if(remaining >= 5 && p.awayScore !== undefined && p.homeScore !== undefined){
+          candidate = p;
+        }
       }
 
-      if(candidate && typeof candidate.awayScore === "number" && typeof candidate.homeScore === "number"){
-        st.q4Snapshot.away = candidate.awayScore - awayQ13;
-        st.q4Snapshot.home = candidate.homeScore - homeQ13;
+      // Coerce with Number() rather than a strict typeof === "number" check —
+      // if ESPN ever serializes these as numeric strings instead of raw
+      // JSON numbers, a strict check would silently fail every time and
+      // fall straight to the less-precise fallback below with no visible
+      // error at all. Number() handles either case.
+      const awayScore = candidate ? Number(candidate.awayScore) : NaN;
+      const homeScore = candidate ? Number(candidate.homeScore) : NaN;
+
+      if(candidate && !isNaN(awayScore) && !isNaN(homeScore)){
+        st.q4Snapshot.away = awayScore - awayQ13;
+        st.q4Snapshot.home = homeScore - homeQ13;
+        console.log(`[Q4 backfill] ${gid}: reconstructed from ${scoringPlays.length} plays -> away=${st.q4Snapshot.away}, home=${st.q4Snapshot.home} (raw scores ${awayScore}/${homeScore} at clock ${candidate.clock && candidate.clock.displayValue})`);
       } else {
         // Play-by-play reconstruction didn't find a usable data point (ESPN's
-        // scoringPlays schema isn't consistently documented, so this can
-        // legitimately fail). Falling back to a hardcoded 0-0 was almost
-        // always wrong — a team virtually never scores exactly 0 points in
-        // the first 5 minutes of a quarter. Use the team's actual final Q4
-        // score instead: a real, always-available number that's a far more
+        // schema isn't consistently documented, so this can legitimately
+        // fail). Falling back to a hardcoded 0-0 was almost always wrong —
+        // a team virtually never scores exactly 0 points in the first 5
+        // minutes of a quarter. Use the team's actual final Q4 score
+        // instead: a real, always-available number that's a far more
         // reasonable stand-in than a guaranteed-wrong zero.
+        console.warn(`[Q4 backfill] ${gid}: no usable Q4 candidate found (${scoringPlays.length} total plays returned, candidate=${candidate ? "found but non-numeric score" : "none matched period/clock"}) — falling back to final Q4 score`);
         st.q4Snapshot.away = away.q4;
         st.q4Snapshot.home = home.q4;
       }
@@ -940,11 +955,12 @@ async function backfillQ4Snapshot(gid, away, home){
       recalcGame(gid);
       return;
     } catch(e){
-      // try next proxy
+      console.warn(`[Q4 backfill] ${gid}: ${shortUrl(url)} -> threw: ${e.message || e}`);
     }
   }
   // All proxies failed — leave snapshot unset; it'll retry on the next poll
   // since backfillAttempted only blocks re-triggering within this attempt cycle.
+  console.error(`[Q4 backfill] ${gid}: all proxies failed, will retry on next poll`);
   st.backfillAttempted = false;
 }
 
