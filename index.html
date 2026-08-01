@@ -869,126 +869,6 @@ function scoreboardUrls(){
   return attempts;
 }
 
-// --- WNBA.com game ID derivation ---
-// WNBA.com's own game IDs turn out to be a simple running counter across the
-// whole season (confirmed empirically: consecutive games get consecutive
-// IDs, across day boundaries too). Given one known anchor point, we can
-// compute any later day's first game ID by summing how many games ESPN
-// reports were played on each day in between.
-const WNBA_ID_ANCHOR_DATE = "20260730"; // YYYYMMDD
-const WNBA_ID_ANCHOR_ID = 1022600210;    // first game's ID on the anchor date
-
-// Temporary: back to ScrapingBee for the WNBA.com backfill specifically,
-// since the free public CORS proxies are being blocked at the DNS level on
-// this network. No render_js needed here — this hits a plain JSON API, not
-// a JS-rendered page, so it's a cheap/fast plain fetch-through, not a full
-// browser render (much less credit usage than the earlier HTML-scraping
-// approach). Revisit with a self-hosted Cloudflare Worker later to drop
-// this dependency again.
-const SCRAPINGBEE_KEY = "36R761SNLWNAW961VJ7NZTNSHGNQ5V6O58IVQH92TTVZSYQHMN9X5X5YYZ562W3IWD8OQIN6848FHNOK";
-function scrapingBeeUrl(target){
-  return `https://app.scrapingbee.com/api/v1/?api_key=${SCRAPINGBEE_KEY}&url=${encodeURIComponent(target)}`;
-}
-
-function parseYmd(ymdStr){
-  const y = Number(ymdStr.slice(0,4));
-  const m = Number(ymdStr.slice(4,6)) - 1;
-  const d = Number(ymdStr.slice(6,8));
-  return new Date(y, m, d);
-}
-
-// Counts how many games ESPN reports for a single given date (used to walk
-// forward day-by-day from the anchor).
-async function countEspnGamesOnDate(dateStr){
-  const target = `${SCOREBOARD_URL}?dates=${dateStr}&_=${Date.now()}`;
-  for(const wrap of PROXIES){
-    try{
-      const res = await fetch(wrap(target), { cache: "no-store" });
-      if(!res.ok) continue;
-      const data = await res.json();
-      const count = (data.events || []).length;
-      console.log(`[WNBA backfill] countEspnGamesOnDate(${dateStr}) -> ${count} games`);
-      return count;
-    } catch(e){
-      // try next proxy
-    }
-  }
-  console.error(`[WNBA backfill] countEspnGamesOnDate(${dateStr}) -> FAILED on every proxy`);
-  return null; // couldn't determine — caller should treat this as "give up"
-}
-
-const firstIdCache = {}; // dateStr -> id, in-memory cache per date
-
-// Returns the first WNBA.com game ID for ANY given date, walking forward
-// from the anchor and summing each day's game count along the way. Cached
-// both in memory and localStorage per-date, so this expensive walk only
-// happens once per date ever needed, not on every 5s poll.
-//
-// Deliberately takes a date parameter rather than always using "now" —
-// ESPN's default "today" scoreboard can still include last night's late
-// games after midnight has locally passed, so the correct WNBA-ID date to
-// use is each game's OWN date, never just "whatever the clock says right
-// now". Using "now" here was the actual bug behind wrong wnbaIds showing
-// up for late-night games.
-async function getFirstWnbaIdForDate(dateStr){
-  if(firstIdCache[dateStr] !== undefined) return firstIdCache[dateStr];
-
-  const storageKey = `wnba_first_id_${dateStr}`;
-  try{
-    const stored = localStorage.getItem(storageKey);
-    if(stored !== null){
-      const id = Number(stored);
-      firstIdCache[dateStr] = id;
-      console.log(`[WNBA backfill] getFirstWnbaIdForDate(${dateStr}) -> ${id} (from localStorage cache)`);
-      return id;
-    }
-  } catch(e){ /* localStorage unavailable — ignore */ }
-
-  if(dateStr === WNBA_ID_ANCHOR_DATE){
-    firstIdCache[dateStr] = WNBA_ID_ANCHOR_ID;
-    console.log(`[WNBA backfill] getFirstWnbaIdForDate(${dateStr}) -> ${WNBA_ID_ANCHOR_ID} (is the anchor date)`);
-    return WNBA_ID_ANCHOR_ID;
-  }
-
-  const target = parseYmd(dateStr);
-  const anchor = parseYmd(WNBA_ID_ANCHOR_DATE);
-
-  if(target > anchor){
-    // Walk forward from the anchor, summing each day's game count.
-    let cursor = parseYmd(WNBA_ID_ANCHOR_DATE);
-    let id = WNBA_ID_ANCHOR_ID;
-    while(cursor < target){
-      const count = await countEspnGamesOnDate(ymd(cursor));
-      if(count === null){
-        console.error(`[WNBA backfill] getFirstWnbaIdForDate(${dateStr}) -> giving up, could not count games on ${ymd(cursor)}`);
-        return null; // can't compute reliably — caller falls back
-      }
-      id += count;
-      cursor.setDate(cursor.getDate() + 1);
-    }
-    try{ localStorage.setItem(storageKey, String(id)); } catch(e){}
-    firstIdCache[dateStr] = id;
-    return id;
-  } else {
-    // Walk backward from the anchor, subtracting each day's game count.
-    let cursor = parseYmd(WNBA_ID_ANCHOR_DATE);
-    cursor.setDate(cursor.getDate() - 1);
-    let id = WNBA_ID_ANCHOR_ID;
-    while(cursor >= target){
-      const count = await countEspnGamesOnDate(ymd(cursor));
-      if(count === null){
-        console.error(`[WNBA backfill] getFirstWnbaIdForDate(${dateStr}) -> giving up, could not count games on ${ymd(cursor)}`);
-        return null;
-      }
-      id -= count;
-      cursor.setDate(cursor.getDate() - 1);
-    }
-    try{ localStorage.setItem(storageKey, String(id)); } catch(e){}
-    firstIdCache[dateStr] = id;
-    return id;
-  }
-}
-
 // Reconstructs the Q4 score exactly as it stood when the clock hit 5:00
 // remaining, using ESPN's per-game scoringPlays feed. Needed when the page
 // loads (or first sees this game) after that moment has already passed —
@@ -1060,111 +940,16 @@ async function backfillQ4Snapshot(gid, away, home){
   st.backfillAttempted = false;
 }
 
-function parseIsoClockRemaining(iso){
-  // WNBA.com's playbyplay JSON uses ISO 8601 duration format, e.g. "PT05M27.00S"
-  if(!iso) return null;
-  const m = iso.match(/PT(\d+)M([\d.]+)S/);
-  if(!m) return null;
-  const minutes = parseInt(m[1], 10);
-  const seconds = parseFloat(m[2]);
-  if(isNaN(minutes) || isNaN(seconds)) return null;
-  return minutes + seconds / 60;
-}
-
-// Tries to get the precise Q4 5:00-mark score from WNBA.com's own static
-// play-by-play JSON (cdn.wnba.com — same public CDN family as their
-// scoreboard feed, no headless-browser rendering needed at all), using the
-// game ID derived from the anchor-based counter. This is the precise
-// source — ESPN's scoringPlays reconstruction is only a fallback if this
-// doesn't pan out (ID drift, fetch failure, unexpected data shape).
-async function attemptWnbaBackfill(gid, away, home){
-  const st = gameState[gid];
-  if(!st){
-    console.error(`[WNBA backfill] ${gid}: no gameState found`);
-    return false;
-  }
-  if(st.wnbaGameDate === undefined || st.wnbaGameIndex === undefined){
-    console.error(`[WNBA backfill] ${gid}: wnbaGameDate/wnbaGameIndex is undefined, giving up`);
-    return false;
-  }
-
-  const firstId = await getFirstWnbaIdForDate(st.wnbaGameDate);
-  if(firstId === null){
-    console.error(`[WNBA backfill] ${gid}: getFirstWnbaIdForDate(${st.wnbaGameDate}) returned null, giving up`);
-    return false;
-  }
-
-  const wnbaId = firstId + st.wnbaGameIndex;
-  console.log(`[WNBA backfill] ${gid}: trying wnbaId=${wnbaId} (date=${st.wnbaGameDate}, firstId=${firstId} + index=${st.wnbaGameIndex})`);
-  const target = `https://cdn.wnba.com/static/json/liveData/playbyplay/playbyplay_${wnbaId}.json`;
-  const attempts = [scrapingBeeUrl(target), target, ...PROXIES.slice(0, 3).map(w => w(target))];
-
-  for(const url of attempts){
-    try{
-      const res = await fetch(url, { cache: "no-store" });
-      if(!res.ok){
-        console.warn(`[WNBA backfill] ${gid}: ${shortUrl(url)} -> HTTP ${res.status}`);
-        continue;
-      }
-      const data = await res.json();
-
-      if(gameState[gid] !== st){
-        console.warn(`[WNBA backfill] ${gid}: sheet was rebuilt mid-flight, aborting`);
-        return false;
-      }
-
-      const game = data.game || {};
-      // Sanity check: the returned game's own ID should match what we
-      // requested — guards against a proxy/CDN quirk silently substituting
-      // different content.
-      if(String(game.gameId) !== String(wnbaId)){
-        console.warn(`[WNBA backfill] ${gid}: ${shortUrl(url)} -> gameId mismatch (got ${game.gameId}, expected ${wnbaId})`);
-        continue;
-      }
-
-      const actions = game.actions || [];
-      let candidate = null;
-      for(const a of actions){
-        if(a.period !== 4) continue;
-        const remaining = parseIsoClockRemaining(a.clock);
-        if(remaining === null) continue;
-        if(remaining >= 5 && typeof a.scoreHome === "string" && typeof a.scoreAway === "string"){
-          candidate = a;
-        }
-      }
-      if(!candidate){
-        console.warn(`[WNBA backfill] ${gid}: ${shortUrl(url)} -> matched game but no Q4 candidate found (${actions.length} total actions, game may not have reached Q4 yet)`);
-        continue;
-      }
-      console.log(`[WNBA backfill] ${gid}: SUCCESS via ${shortUrl(url)} -> away=${candidate.scoreAway} home=${candidate.scoreHome} at clock=${candidate.clock}`);
-
-      const awayQ13 = away.q1 + away.q2 + away.q3;
-      const homeQ13 = home.q1 + home.q2 + home.q3;
-      st.q4Snapshot.away = Number(candidate.scoreAway) - awayQ13;
-      st.q4Snapshot.home = Number(candidate.scoreHome) - homeQ13;
-
-      const f2El = eg(gid, "F2");
-      const f3El = eg(gid, "F3");
-      if(f2El) f2El.value = st.q4Snapshot.away;
-      if(f3El) f3El.value = st.q4Snapshot.home;
-      recalcGame(gid);
-      return true;
-    } catch(e){
-      console.warn(`[WNBA backfill] ${gid}: ${shortUrl(url)} -> threw: ${e.message || e}`);
-    }
-  }
-  console.error(`[WNBA backfill] ${gid}: all attempts exhausted, falling back to ESPN reconstruction`);
-  return false;
-}
-
-// Tries the precise WNBA.com source first; falls back to the ESPN
-// reconstruction (and that has its own final-Q4-score fallback) if it
-// doesn't succeed for any reason.
+// Reconstructs the Q4 score exactly as it stood when the clock hit 5:00
+// remaining, using ESPN's own play-by-play/scoringPlays feed. This used to
+// be a fallback for a WNBA.com-based primary lookup, but that endpoint
+// (cdn.wnba.com/.../playbyplay_<id>.json) has been discontinued — as of
+// Aug 2026 it returns the wnba.com site's HTML shell instead of JSON for
+// every game ID, confirmed via debug logging. ESPN's summary endpoint is
+// now the only source for this, which also means no more ScrapingBee
+// dependency (and no exposed API key) for the whole site.
 async function runQ4Backfill(gid, away, home){
-  const gotIt = await attemptWnbaBackfill(gid, away, home);
-  if(!gotIt){
-    await backfillQ4Snapshot(gid, away, home);
-  }
+  await backfillQ4Snapshot(gid, away, home);
 }
 
 function shortUrl(url){
@@ -1267,27 +1052,9 @@ async function fetchScores(){
       rebuildForOT(needed);
     }
 
-    // Index games per THEIR OWN date, not a flat index across the whole
-    // list — ESPN's "today" response can include late-night games that
-    // actually belong to the previous calendar day (e.g. right after
-    // midnight), and mixing those into one flat count would compute the
-    // wrong WNBA.com ID for every game in the mismatched date.
-    const dateIndexCounters = {};
     for(const g of parsedList){
       const gid = "g" + g.id;
-      const gameDateStr = ymd(new Date(g.date));
-      const idx = dateIndexCounters[gameDateStr] || 0;
-      dateIndexCounters[gameDateStr] = idx + 1;
-
-      // Must set these BEFORE applyGameData runs — applyGameData is what
-      // triggers the Q4 backfill internally, and that backfill needs them
-      // to compute the WNBA.com game ID. Setting them after was a real
-      // bug: the first backfill attempt for any game would always find
-      // these undefined, silently fall back to the less-precise ESPN
-      // source, and then never retry since the fallback already "succeeded".
       ensureGameBlock(gid); // safe no-op if the block already exists
-      gameState[gid].wnbaGameDate = gameDateStr;
-      gameState[gid].wnbaGameIndex = idx;
       applyGameData(gid, g.away, g.home, g.status, g.overUnder);
     }
 
