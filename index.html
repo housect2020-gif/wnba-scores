@@ -570,18 +570,20 @@ function enableManualFallbackBlock(){
   recalcGame("manual");
 }
 
-// Rebuilds K5's suggested-values list (via <datalist>) to span (I5-20) to
-// (I5+20), floored at 0. These are only suggestions — K5 is a free-typing
+// Rebuilds K5's suggested-values list (via <datalist>) to span (center-20)
+// to (center+20), floored at 0. `center` is the market total when ESPN
+// provides one, else the live running total as a fallback — see the call
+// site in recalcGame. These are only suggestions — K5 is a free-typing
 // field, so any whole number can still be entered manually regardless of
 // what's listed here. The ".5" is a fixed suffix next to the field, not
 // part of what's typed or listed. Only touches the DOM when the range
 // actually changed, so it doesn't disrupt an open dropdown mid-poll.
-function rebuildK5Options(gid, I5){
+function rebuildK5Options(gid, center){
   const listEl = document.getElementById(`${gid}-K5list`);
   if(!listEl) return;
 
-  let min = I5 - 20;
-  const max = I5 + 20;
+  let min = center - 20;
+  const max = center + 20;
   if(min < 0) min = 0;
 
   const key = `${min}:${max}`;
@@ -663,7 +665,13 @@ function recalcGame(gid){
   eg(gid,"F5").textContent = fmt(F5);
   eg(gid,"G5").textContent = fmt(G5);
   eg(gid,"I5").textContent = fmt(I5);
-  rebuildK5Options(gid, I5);
+  // Center K5's suggested range on the real sportsbook total when ESPN
+  // provides one (typically 150-200 for a WNBA game) — the live running
+  // score (I5) is only a fraction of that until very late in the game,
+  // so using it as the center made realistic total-line guesses like
+  // 176 fall outside the suggested range for most of the game.
+  const k5Center = st.marketTotal !== undefined ? st.marketTotal : I5;
+  rebuildK5Options(gid, k5Center);
 
   // M3
   const avgB4D4 = round0AvgB4D4(B4, C4, D4);
@@ -723,6 +731,11 @@ function recalcGame(gid){
 function applyGameData(gid, away, home, status, overUnder){
   ensureGameBlock(gid);
   const st = gameState[gid];
+  // Stash the market total (if ESPN has one for this game) so recalcGame
+  // can center K5's suggested range on a realistic full-game total
+  // instead of the live in-progress score, which is only ever a fraction
+  // of a typical final total until very late in the game.
+  if(typeof overUnder === "number") st.marketTotal = overUnder;
 
   eg(gid,"awayName").textContent = away.name;
   eg(gid,"homeName").textContent = home.name;
