@@ -514,7 +514,7 @@ function makeGameRowsHtml(gid){
         </select>
       </td>
       <td class="k5-cell">
-        <input type="number" inputmode="numeric" class="k5" id="${gid}-K5" list="${gid}-K5list" placeholder="0" autocomplete="off">
+        <input type="text" inputmode="numeric" pattern="[0-9]*" class="k5" id="${gid}-K5" list="${gid}-K5list" placeholder="0" autocomplete="off">
         <datalist id="${gid}-K5list"></datalist>
         <span class="k5-suffix">.5</span>
       </td>
