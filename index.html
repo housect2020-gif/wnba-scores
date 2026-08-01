@@ -889,7 +889,15 @@ async function backfillQ4Snapshot(gid, away, home){
       const res = await fetch(url, { cache: "no-store" });
       if(!res.ok) continue;
       const data = await res.json();
-      const scoringPlays = data.scoringPlays || [];
+      // NOTE: ESPN's summary payload does NOT reliably populate
+      // `scoringPlays` — confirmed via debug logging on the companion
+      // Python script that the real, populated field is `plays` (full
+      // play-by-play, ~400+ entries per game, each still carrying
+      // awayScore/homeScore/period/clock). Using `scoringPlays` here was
+      // silently returning an empty array every time, so `candidate`
+      // below was always null and this was quietly falling through to
+      // the final-Q4-score fallback on every single game.
+      const scoringPlays = data.plays || [];
 
       // If the sheet was rebuilt (e.g. a new OT column appeared) while this
       // request was in flight, this game's state object is now orphaned —
