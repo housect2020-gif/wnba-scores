@@ -829,12 +829,12 @@ function applyGameData(gid, away, home, status, overUnder){
 const SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/scoreboard";
 
 const PROXIES = [
+  url => url,
   url => "https://corsproxy.io/?url=" + encodeURIComponent(url),
   url => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
   url => "https://api.codetabs.com/v1/proxy/?quest=" + encodeURIComponent(url),
   url => "https://cors.x2u.in/" + url,
-  url => "https://thingproxy.freeboard.io/fetch/" + url,
-  url => url
+  url => "https://thingproxy.freeboard.io/fetch/" + url
 ];
 
 function ymd(d){
