@@ -277,6 +277,18 @@
     tr{ break-inside:avoid; page-break-inside:avoid; }
     thead, .colhead, .hdr-row{ break-after:avoid; }
     @page{ size:landscape; margin:12mm; }
+
+    /* Chrome (and most browsers) strip background colors by default when
+       printing/saving to PDF, even though everything else renders as
+       shown — this is what was washing out the yellow Avg Q1-3 cells,
+       pink T=35min cells, green Total cells, and header shading. This
+       forces the browser to keep them, matching the on-screen colors
+       exactly rather than an approximation. */
+    *{
+      -webkit-print-color-adjust:exact !important;
+      print-color-adjust:exact !important;
+      color-adjust:exact !important;
+    }
   }
 </style>
 </head>
