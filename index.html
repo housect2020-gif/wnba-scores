@@ -203,12 +203,12 @@
     display:flex;
     align-items:center;
     justify-content:center;
-    gap:2px;
+    gap:3px;
   }
-  .k5{
+  .k5-manual{
     display:inline-block !important;
-    width:52px !important;
-    max-width:52px;
+    width:44px !important;
+    max-width:44px;
     flex:0 0 auto;
     margin:0 !important;
     border:1px solid #c7cad0;
@@ -218,43 +218,28 @@
     padding:2px 1px;
     font-family:inherit;
   }
+  .k5-select{
+    display:inline-block !important;
+    width:20px !important;
+    max-width:20px;
+    flex:0 0 auto;
+    margin:0 !important;
+    border:1px solid #c7cad0;
+    border-radius:3px;
+    text-align:center;
+    font-size:11px;
+    padding:2px 0px;
+    font-family:inherit;
+    color:transparent; /* hides the closed box's own selected-value text */
+  }
+  .k5-select option{
+    color:#202124; /* the popup list itself still needs to be readable */
+  }
   .k5-suffix{
     flex:0 0 auto;
     font-size:11px;
     font-weight:600;
     color:#3c4043;
-  }
-  .k5-wrap{
-    position:relative;
-    display:inline-block;
-    flex:0 0 auto;
-  }
-  .k5-dropdown{
-    display:none;
-    position:absolute;
-    top:100%;
-    left:0;
-    z-index:50;
-    background:#fff;
-    border:1px solid #c7cad0;
-    border-radius:3px;
-    max-height:160px;
-    overflow-y:auto;
-    min-width:52px;
-    box-shadow:0 2px 6px rgba(0,0,0,0.18);
-  }
-  .k5-dropdown.open{
-    display:block;
-  }
-  .k5-option{
-    padding:3px 8px;
-    font-size:11px;
-    cursor:pointer;
-    white-space:nowrap;
-    text-align:center;
-  }
-  .k5-option:hover, .k5-option.active{
-    background:#e8f0fe;
   }
   .footer{
     margin-top:12px;
@@ -275,6 +260,24 @@
     color:#3c4043;
   }
   button.refresh:hover{background:#f1f3f4;}
+  #reportDate{
+    font-weight:600;
+    color:#3c4043;
+  }
+
+  @media print{
+    /* Buttons, the debug fetch-attempt log, and the "click to refresh"
+       hint don't belong in a static export — everything else (title,
+       status badge, table, footer text incl. the date) stays exactly
+       as shown on screen. */
+    .no-print{ display:none !important; }
+    body{ background:#fff; margin:0; }
+    .sheet-scroll{ border:none; overflow:visible; }
+    table{ font-size:10px; }
+    tr{ break-inside:avoid; page-break-inside:avoid; }
+    thead, .colhead, .hdr-row{ break-after:avoid; }
+    @page{ size:landscape; margin:12mm; }
+  }
 </style>
 </head>
 <body>
@@ -326,11 +329,13 @@
   <div class="footer">
     <span id="clockInfo">Auto-refreshing every 5s</span>
     <span>
-      <button class="refresh" id="refreshBtn">Refresh now</button>
+      <button class="refresh no-print" id="refreshBtn">Refresh now</button>
+      <button class="refresh no-print" id="downloadPdfBtn">Download PDF</button>
       &nbsp;Last updated: <span id="lastUpdated">—</span>
+      &nbsp;&nbsp;<span id="reportDate"></span>
     </span>
   </div>
-  <div id="debugLog" style="margin-top:6px;font-size:10.5px;color:#9aa0a6;word-break:break-all;"></div>
+  <div id="debugLog" class="no-print" style="margin-top:6px;font-size:10.5px;color:#9aa0a6;word-break:break-all;"></div>
 
 </div>
 
@@ -546,10 +551,10 @@ function makeGameRowsHtml(gid){
         </select>
       </td>
       <td class="k5-cell">
-        <div class="k5-wrap">
-          <input type="text" inputmode="numeric" pattern="[0-9]*" class="k5" id="${gid}-K5" placeholder="0" autocomplete="off">
-          <div class="k5-dropdown" id="${gid}-K5dropdown"></div>
-        </div>
+        <input type="text" inputmode="numeric" pattern="[0-9]*" class="k5-manual" id="${gid}-K5manual" placeholder="Total" autocomplete="off">
+        <select class="k5-select" id="${gid}-K5">
+          <option value="">–</option>
+        </select>
         <span class="k5-suffix">.5</span>
       </td>
       <td class="formula" id="${gid}-L5">–</td>
@@ -563,15 +568,33 @@ function ensureGameBlock(gid){
   if(gameState[gid]) return;
   gameState[gid] = { q4Snapshot: { away: null, home: null }, backfillAttempted: false, lastState: "pre" };
   $("gamesBody").insertAdjacentHTML("beforeend", makeGameRowsHtml(gid));
-  ["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3","K5"].forEach(suffix=>{
+  ["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3"].forEach(suffix=>{
     eg(gid, suffix).addEventListener("input", ()=>recalcGame(gid));
+  });
+  // Whichever of these two the user touches most recently becomes the
+  // authoritative source for K5's centering (see recalcGame) — typing a
+  // new total should win immediately, but picking from the dropdown
+  // afterward (odds move fast mid-game) should just as immediately take
+  // back over, rather than a stale typed value permanently pinning it.
+  eg(gid, "K5manual").addEventListener("input", ()=>{
+    const st = gameState[gid];
+    if(st) st.k5Source = "manual";
+    recalcGame(gid);
+  });
+  eg(gid, "K5").addEventListener("change", ()=>{
+    const st = gameState[gid];
+    const manualEl = eg(gid, "K5manual");
+    if(manualEl) manualEl.value = eg(gid, "K5").value; // keep the display in sync with the pick
+    if(st) st.k5Source = "select";
+    recalcGame(gid);
   });
   eg(gid, "J5").addEventListener("change", ()=>recalcGame(gid));
   eg(gid, "J3").addEventListener("change", ()=>recalcGame(gid));
 
-  // Persist the user's own entries (K5 odds, J5 pick, J3 minutes) so they
-  // stick across page reloads/refreshes on this browser until changed again.
-  ["K5","J5","J3"].forEach(suffix=>{
+  // Persist the user's own entries (manual total, K5 pick, J5 pick, J3
+  // minutes) so they stick across page reloads/refreshes on this browser
+  // until changed again.
+  ["K5manual","K5","J5","J3"].forEach(suffix=>{
     const elx = eg(gid, suffix);
     const saved = loadField(gid, suffix);
     if(saved !== null) elx.value = saved;
@@ -587,24 +610,6 @@ function ensureGameBlock(gid){
   const savedJ4 = loadField(gid, "J4");
   if(savedJ4 !== null){
     eg(gid, "J4").textContent = savedJ4;
-  }
-
-  // Custom K5 dropdown wiring (see renderK5Dropdown/selectK5Value/
-  // closeK5Dropdown above for why this replaced the native <datalist>).
-  const k5Input = eg(gid, "K5");
-  const k5Drop = document.getElementById(`${gid}-K5dropdown`);
-  k5Input.addEventListener("focus", ()=> renderK5Dropdown(gid));
-  k5Input.addEventListener("input", ()=> renderK5Dropdown(gid));
-  // A short delay on blur lets the dropdown's own mousedown handler (below)
-  // register the click before the dropdown gets torn down — without it,
-  // blur fires first and the click never reaches the option.
-  k5Input.addEventListener("blur", ()=> setTimeout(()=> closeK5Dropdown(gid), 150));
-  if(k5Drop){
-    k5Drop.addEventListener("mousedown", (e)=>{
-      e.preventDefault(); // keep focus on the input so blur doesn't fire early
-      const opt = e.target.closest(".k5-option");
-      if(opt) selectK5Value(gid, opt.dataset.value);
-    });
   }
 }
 
@@ -622,19 +627,21 @@ function enableManualFallbackBlock(){
   recalcGame("manual");
 }
 
-// Rebuilds the set of K5 suggested values (center-20 to center+20, floored
-// at 0). `center` is the market total when ESPN provides one, else the
-// live running total as a fallback — see the call site in recalcGame.
-// Stored on gameState rather than written into a native <datalist>: Chrome
-// closes a datalist's popup as soon as the typed text exactly matches one
-// of its own option values (there's nothing left to "complete"), which
-// made the suggestions disappear right when picking a value that WAS in
-// the list — the opposite of useful. A small custom dropdown (see
-// renderK5Dropdown/selectK5Value below) sidesteps that entirely since we
-// control exactly when it opens and closes.
-function rebuildK5Options(gid, center){
+// Rebuilds K5's <select> options to span (center-20) to (center+20),
+// floored at 0. `center` is the manually-typed total when one's been
+// entered, else the market total from ESPN when available, else the live
+// running total as a last-resort fallback — see the call site in
+// recalcGame. When a manual value is typed, the dropdown always jumps to
+// start right on that value (overriding any earlier pick) — that's the
+// whole point of typing one in. Without a manual value, whatever was
+// previously selected is preserved across rebuilds as long as it's still
+// within the new range, so an unrelated score update doesn't reset an
+// existing choice.
+function rebuildK5Options(gid, center, preferredValue){
   const st = gameState[gid];
-  if(!st) return;
+  const selectEl = eg(gid, "K5");
+  const displayEl = eg(gid, "K5manual");
+  if(!st || !selectEl) return;
 
   let min = center - 20;
   const max = center + 20;
@@ -644,47 +651,25 @@ function rebuildK5Options(gid, center){
   if(st.k5RangeKey === key) return;
   st.k5RangeKey = key;
 
-  const values = [];
-  for(let v = min; v <= max; v++) values.push(v);
-  st.k5Options = values;
-}
-
-// Shows/filters the custom K5 dropdown based on what's currently typed —
-// matches by prefix (typing "17" shows 170-179 etc. from the suggested
-// range), or shows the full range when the field is empty.
-function renderK5Dropdown(gid){
-  const st = gameState[gid];
-  const inputEl = eg(gid, "K5");
-  const dropEl = document.getElementById(`${gid}-K5dropdown`);
-  if(!st || !st.k5Options || !inputEl || !dropEl) return;
-
-  const typed = inputEl.value.trim();
-  const matches = typed === "" ? st.k5Options : st.k5Options.filter(v => String(v).startsWith(typed));
-
-  if(matches.length === 0){
-    dropEl.classList.remove("open");
-    dropEl.innerHTML = "";
-    return;
+  const previousValue = selectEl.value;
+  let html = `<option value="">–</option>`;
+  for(let v = min; v <= max; v++){
+    html += `<option value="${v}">${v}</option>`;
   }
-  dropEl.innerHTML = matches.map(v => `<div class="k5-option" data-value="${v}">${v}</div>`).join("");
-  dropEl.classList.add("open");
-}
+  selectEl.innerHTML = html;
 
-function closeK5Dropdown(gid){
-  const dropEl = document.getElementById(`${gid}-K5dropdown`);
-  if(dropEl){
-    dropEl.classList.remove("open");
-    dropEl.innerHTML = "";
+  if(preferredValue !== null && preferredValue >= min && preferredValue <= max){
+    selectEl.value = String(preferredValue);
+  } else if(previousValue !== "" && Number(previousValue) >= min && Number(previousValue) <= max){
+    selectEl.value = previousValue;
+  } else {
+    selectEl.value = "";
   }
-}
 
-function selectK5Value(gid, value){
-  const inputEl = eg(gid, "K5");
-  if(!inputEl) return;
-  inputEl.value = value;
-  closeK5Dropdown(gid);
-  recalcGame(gid);
-  saveField(gid, "K5", inputEl.value);
+  // The left box is a pure read-only mirror of whatever K5 is currently
+  // set to — this is what stays visible; the select itself keeps its own
+  // text hidden via CSS and exists only as the picker mechanism.
+  if(displayEl) displayEl.value = selectEl.value;
 }
 
 function recalcGame(gid){
@@ -755,13 +740,37 @@ function recalcGame(gid){
   eg(gid,"F5").textContent = fmt(F5);
   eg(gid,"G5").textContent = fmt(G5);
   eg(gid,"I5").textContent = fmt(I5);
-  // Center K5's suggested range on the real sportsbook total when ESPN
-  // provides one (typically 150-200 for a WNBA game) — the live running
-  // score (I5) is only a fraction of that until very late in the game,
-  // so using it as the center made realistic total-line guesses like
-  // 176 fall outside the suggested range for most of the game.
-  const k5Center = st.marketTotal !== undefined ? st.marketTotal : I5;
-  rebuildK5Options(gid, k5Center);
+  // Center K5's dropdown on whichever of manual/select was most recently
+  // touched (see the "input"/"change" listeners in ensureGameBlock) — a
+  // fresh dropdown pick should immediately take over from an older typed
+  // value (odds move fast mid-game, picking is faster than retyping),
+  // and a freshly typed value should likewise immediately override
+  // whatever was previously picked. Before either has ever been touched,
+  // fall back to the real sportsbook total when ESPN provides one
+  // (typically 150-200 for a WNBA game); the live running score (I5) is
+  // only a fraction of that until very late in the game, so it's used
+  // only as a last resort.
+  const k5ManualRaw = eg(gid,"K5manual").value.trim();
+  const k5Manual = k5ManualRaw === "" ? null : Number(k5ManualRaw);
+  const k5ManualValid = k5Manual !== null && !isNaN(k5Manual);
+
+  const k5CurrentRaw = eg(gid,"K5").value;
+  const k5Current = k5CurrentRaw === "" ? null : Number(k5CurrentRaw);
+  const k5CurrentValid = k5Current !== null && !isNaN(k5Current);
+
+  let preferredValue = null;
+  if(st.k5Source === "manual" && k5ManualValid){
+    preferredValue = k5Manual;
+  } else if(st.k5Source === "select" && k5CurrentValid){
+    preferredValue = k5Current;
+  } else if(k5CurrentValid){
+    preferredValue = k5Current;
+  } else if(k5ManualValid){
+    preferredValue = k5Manual;
+  }
+
+  const k5Center = preferredValue !== null ? preferredValue : (st.marketTotal !== undefined ? st.marketTotal : I5);
+  rebuildK5Options(gid, k5Center, preferredValue);
 
   // M3
   const avgB4D4 = round0AvgB4D4(B4, C4, D4);
@@ -1170,6 +1179,7 @@ async function fetchScores(){
     showBanner(null);
     liveMode = true;
     failCount = 0;
+    updateReportDate(parsedList[0].date);
 
     const liveCount = parsedList.filter(g => g.status.state === "in").length;
     const allFinal = parsedList.every(g => g.status.state === "post");
@@ -1244,6 +1254,23 @@ function stopAutoRefresh(){
 // applyGameData) — no separate odds API/key/polling loop needed at all.
 
 $("refreshBtn").addEventListener("click", fetchScores);
+
+// Date stamp shown bottom-right, day/month/year format (e.g. "2 August
+// 2026") — this is the DATE OF THE GAME(S) currently displayed (taken
+// from the first game in the sorted list, since a single page load is
+// always one day's slate), not the viewer's own current date. Those two
+// can differ if the page is left open past midnight, or opened again
+// later to review a finished slate.
+function updateReportDate(isoDateStr){
+  const d = isoDateStr ? new Date(isoDateStr) : new Date();
+  const day = d.getDate();
+  const month = d.toLocaleString("en-US", { month: "long" });
+  const year = d.getFullYear();
+  $("reportDate").textContent = `${day} ${month} ${year}`;
+}
+updateReportDate(); // placeholder (today) until the first successful fetch sets the real game date
+
+$("downloadPdfBtn").addEventListener("click", ()=> window.print());
 
 fetchScores();
 </script>
