@@ -1097,7 +1097,27 @@ async function backfillQ4Snapshot(gid, away, home){
 // every game ID, confirmed via debug logging. ESPN's summary endpoint is
 // now the only source for this, which also means no more ScrapingBee
 // dependency (and no exposed API key) for the whole site.
+// gids currently showing simulated (not real) data — see simulateGames
+// below. Used to skip the real-ESPN Q4 backfill attempt for them, since
+// a fake game ID can never match a real ESPN event and would otherwise
+// noisily exhaust every proxy attempt for nothing.
+const simulatedGids = new Set();
+
 async function runQ4Backfill(gid, away, home){
+  if(simulatedGids.has(gid)){
+    console.log(`[Q4 backfill] ${gid}: simulated game — skipping the real ESPN lookup, using final Q4 score directly.`);
+    const st = gameState[gid];
+    if(st){
+      st.q4Snapshot.away = away.q4;
+      st.q4Snapshot.home = home.q4;
+      const f2El = eg(gid, "F2");
+      const f3El = eg(gid, "F3");
+      if(f2El) f2El.value = st.q4Snapshot.away;
+      if(f3El) f3El.value = st.q4Snapshot.home;
+      recalcGame(gid);
+    }
+    return;
+  }
   await backfillQ4Snapshot(gid, away, home);
 }
 
@@ -1318,8 +1338,10 @@ function simulateGames(configs){
 
   updateReportDate(parsedList[0].date);
 
+  simulatedGids.clear();
   for(const g of parsedList){
     const gid = "g" + g.id;
+    simulatedGids.add(gid);
     ensureGameBlock(gid);
     applyGameData(gid, g.away, g.home, g.status, g.overUnder);
   }
