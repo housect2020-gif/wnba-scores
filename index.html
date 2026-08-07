@@ -1097,19 +1097,29 @@ async function backfillQ4Snapshot(gid, away, home){
 // every game ID, confirmed via debug logging. ESPN's summary endpoint is
 // now the only source for this, which also means no more ScrapingBee
 // dependency (and no exposed API key) for the whole site.
-// gids currently showing simulated (not real) data — see simulateGames
-// below. Used to skip the real-ESPN Q4 backfill attempt for them, since
-// a fake game ID can never match a real ESPN event and would otherwise
-// noisily exhaust every proxy attempt for nothing.
-const simulatedGids = new Set();
+// gids currently showing simulated (not real) data, mapped to an optional
+// explicit Q4=5min snapshot override ({away, home}) — see simulateGames
+// below. Used to skip the real-ESPN Q4 backfill attempt for them, since a
+// fake game ID can never match a real ESPN event.
+const simulatedGids = new Map();
 
 async function runQ4Backfill(gid, away, home){
   if(simulatedGids.has(gid)){
-    console.log(`[Q4 backfill] ${gid}: simulated game — skipping the real ESPN lookup, using final Q4 score directly.`);
+    const override = simulatedGids.get(gid);
     const st = gameState[gid];
     if(st){
-      st.q4Snapshot.away = away.q4;
-      st.q4Snapshot.home = home.q4;
+      if(override){
+        // A real, known Q4=5min snapshot was supplied (e.g. reconstructing
+        // an actual past game from a saved export) — use it exactly,
+        // rather than the fallback guess below.
+        st.q4Snapshot.away = override.away;
+        st.q4Snapshot.home = override.home;
+        console.log(`[Q4 backfill] ${gid}: simulated game — using supplied real snapshot (away=${override.away}, home=${override.home}).`);
+      } else {
+        st.q4Snapshot.away = away.q4;
+        st.q4Snapshot.home = home.q4;
+        console.log(`[Q4 backfill] ${gid}: simulated game — no snapshot supplied, falling back to final Q4 score.`);
+      }
       const f2El = eg(gid, "F2");
       const f3El = eg(gid, "F3");
       if(f2El) f2El.value = st.q4Snapshot.away;
@@ -1330,6 +1340,9 @@ function buildSyntheticEvent(cfg){
 function simulateGames(configs){
   stopAutoRefresh(); // otherwise the next 5s poll overwrites this with real data
 
+  const configById = {};
+  configs.forEach(c => { configById[String(c.id)] = c; });
+
   const rawEvents = configs.map(buildSyntheticEvent);
   const parsedList = rawEvents.map(parseEvent).sort((a, b) => new Date(a.date) - new Date(b.date));
 
@@ -1341,7 +1354,9 @@ function simulateGames(configs){
   simulatedGids.clear();
   for(const g of parsedList){
     const gid = "g" + g.id;
-    simulatedGids.add(gid);
+    const cfg = configById[g.id];
+    const hasOverride = cfg && cfg.awayF !== undefined && cfg.homeF !== undefined;
+    simulatedGids.set(gid, hasOverride ? { away: cfg.awayF, home: cfg.homeF } : null);
     ensureGameBlock(gid);
     applyGameData(gid, g.away, g.home, g.status, g.overUnder);
   }
