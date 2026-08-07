@@ -805,27 +805,32 @@ function recalcGame(gid){
   const L5 = K5 === null ? "–" : fmt(Math.abs(K5 - I5), 1);
   eg(gid,"L5").textContent = L5;
 
-  // M5 (Suggested Pick) — reverted back to the original M3-driven formula:
-  // IF(OR(ISBLANK(F2),ISBLANK(F3)),"",
-  //   IF(M3="Above Avg","Under",
-  //   IF(M3="Below Avg","Over",
-  //   IF(F4<=15,"Over",
-  //   IF(K5>G5,"Over","Under")))))
-  const f2Blank = eg(gid,"F2").value === "";
-  const f3Blank = eg(gid,"F3").value === "";
+  // M5 (Suggested Pick) — custom decision tree (replaces the old
+  // M3-driven formula), prioritized in this order:
+  //   1. M3 == "Above Avg"                    -> Under
+  //   2. L4 < K5 AND G5 > K5                    -> Over   (checked before
+  //      rule 3 on purpose — this specific combination is the one case
+  //      that should win out over the broader "either one is high" rule)
+  //   3. L4 > K5 OR G5 > K5                     -> Under
+  //   4. L4 < K5                                -> Under
+  //   5. otherwise (K5 missing, or an exact tie) -> "–" (no clear signal)
+  // G5 (predicted total) and L4 (needed-to-score reference) are the two
+  // values being weighed against K5 (the odds/total pick) throughout.
+  // Only shows a pick from Q4 onward — before that there's no Q4-based
+  // signal yet, so it stays blank rather than guessing.
   let M5;
-  if(f2Blank || f3Blank){
+  if((st.period || 0) < 4){
     M5 = "";
   } else if(M3 === "Above Avg"){
     M5 = "Under";
-  } else if(M3 === "Below Avg"){
+  } else if(K5 !== null && L4 < K5 && G5 > K5){
     M5 = "Over";
-  } else if(F4 <= 15){
-    M5 = "Over";
-  } else if(K5 !== null && K5 > G5){
-    M5 = "Over";
-  } else {
+  } else if(K5 !== null && (L4 > K5 || G5 > K5)){
     M5 = "Under";
+  } else if(K5 !== null && L4 < K5){
+    M5 = "Under";
+  } else {
+    M5 = "";
   }
   eg(gid,"M5").textContent = M5 === "" ? "–" : M5;
 
@@ -858,6 +863,7 @@ function applyGameData(gid, away, home, status, overUnder){
   const period = status.period;
   const state = status.state; // 'pre' | 'in' | 'post'
   st.lastState = state;
+  st.period = period;
 
   const awayQ4Live = period >= 4 ? away.q4 : 0;
   const homeQ4Live = period >= 4 ? home.q4 : 0;
