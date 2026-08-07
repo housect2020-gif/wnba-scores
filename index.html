@@ -376,6 +376,7 @@ function rebuildTableHeader(){
   for(let n=1;n<=extraOTCount;n++){ colHtml += `<col style="width:5%">`; }
   colHtml += `
     <col style="width:6%">
+    <col style="width:6%">
     <col style="width:15%">
     <col style="width:10%">
     <col style="width:10.5%">
@@ -1266,6 +1267,80 @@ function stopAutoRefresh(){
 // applyGameData) — no separate odds API/key/polling loop needed at all.
 
 $("refreshBtn").addEventListener("click", fetchScores);
+
+// --- Game simulator (for testing look-and-feel without waiting for a
+// real game in that state — call from the browser console) ---
+//
+// Builds a synthetic ESPN-shaped event and runs it through the exact
+// same parseEvent -> rebuildForOT -> applyGameData pipeline fetchScores
+// uses for real data, so what renders is a true test of the actual
+// code, not a separate mockup that could drift out of sync with it.
+function buildSyntheticEvent(cfg){
+  const toLinescores = arr => (arr || []).map((v, i) => ({ period: i + 1, value: v }));
+  return {
+    id: String(cfg.id),
+    date: cfg.date || new Date().toISOString(),
+    competitions: [{
+      competitors: [
+        {
+          homeAway: "away",
+          team: { displayName: cfg.awayName, abbreviation: cfg.awayAbbr || cfg.awayName.slice(0, 3).toUpperCase() },
+          linescores: toLinescores(cfg.awayQ)
+        },
+        {
+          homeAway: "home",
+          team: { displayName: cfg.homeName, abbreviation: cfg.homeAbbr || cfg.homeName.slice(0, 3).toUpperCase() },
+          linescores: toLinescores(cfg.homeQ)
+        }
+      ],
+      status: {
+        period: cfg.period,
+        displayClock: cfg.clock || null,
+        type: {
+          state: cfg.state || "post",
+          shortDetail: cfg.statusText || (cfg.state === "post" ? "Final" : ""),
+          detail: cfg.statusText || null
+        }
+      },
+      odds: cfg.overUnder != null ? [{ overUnder: cfg.overUnder }] : []
+    }]
+  };
+}
+
+function simulateGames(configs){
+  stopAutoRefresh(); // otherwise the next 5s poll overwrites this with real data
+
+  const rawEvents = configs.map(buildSyntheticEvent);
+  const parsedList = rawEvents.map(parseEvent).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  const needed = neededOTCount(parsedList);
+  rebuildForOT(needed); // always rebuilds fresh, so each simulation run starts clean
+
+  updateReportDate(parsedList[0].date);
+
+  for(const g of parsedList){
+    const gid = "g" + g.id;
+    ensureGameBlock(gid);
+    applyGameData(gid, g.away, g.home, g.status, g.overUnder);
+  }
+
+  const liveCount = parsedList.filter(g => g.status.state === "in").length;
+  const allFinal = parsedList.every(g => g.status.state === "post");
+  const suffix = allFinal ? " — all final" : (liveCount > 0 ? ` — ${liveCount} live` : " — pre-game");
+  setGlobalStatus(`${parsedList.length} game${parsedList.length > 1 ? "s" : ""} (SIMULATED)${suffix}`, liveCount > 0);
+  $("clockInfo").textContent = "Simulated data — auto-refresh paused. Reload the page to return to live scores.";
+  $("lastUpdated").textContent = new Date().toLocaleTimeString() + " (simulated)";
+
+  console.log(`[simulateGame] Loaded ${parsedList.length} simulated game(s). `
+    + `Auto-refresh is paused — reload the page to return to live data.`);
+}
+
+function simulateGame(cfg){
+  simulateGames([cfg]);
+}
+
+window.simulateGame = simulateGame;
+window.simulateGames = simulateGames;
 
 // Date stamp shown bottom-right, day/month/year format (e.g. "2 August
 // 2026") — this is the DATE OF THE GAME(S) currently displayed (taken
