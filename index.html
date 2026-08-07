@@ -805,30 +805,33 @@ function recalcGame(gid){
   const L5 = K5 === null ? "–" : fmt(Math.abs(K5 - I5), 1);
   eg(gid,"L5").textContent = L5;
 
-  // M5 (Suggested Pick) — custom decision tree (replaces the old
-  // M3-driven formula), prioritized in this order:
-  //   1. M3 == "Above Avg"                    -> Under
-  //   2. L4 < K5 AND G5 > K5                    -> Over   (checked before
-  //      rule 3 on purpose — this specific combination is the one case
-  //      that should win out over the broader "either one is high" rule)
-  //   3. L4 > K5 OR G5 > K5                     -> Under
-  //   4. L4 < K5                                -> Under
-  //   5. otherwise (K5 missing, or an exact tie) -> "–" (no clear signal)
-  // G5 (predicted total) and L4 (needed-to-score reference) are the two
-  // values being weighed against K5 (the odds/total pick) throughout.
+  // M5 (Suggested Pick) — G5 (predicted total) vs K5 (the pick) is the
+  // primary signal. This replaced an earlier version that also weighed
+  // L4 as an equal factor, but two real flagged cases (Sparks@Sky: G5
+  // above K5 but L4 below it; Aces@Dream: G5 and L4 both above K5) both
+  // needed "Over" — L4 pointed opposite directions in those two cases
+  // while G5 agreed both times, showing G5 is the number that actually
+  // tracks the right call, not L4. L4/M3 only step in for the genuine
+  // edge case where G5 exactly ties K5 (rare — a real number tie).
   // Only shows a pick from Q4 onward — before that there's no Q4-based
   // signal yet, so it stays blank rather than guessing.
   let M5;
   if((st.period || 0) < 4){
     M5 = "";
+  } else if(K5 === null){
+    M5 = "";
+  } else if(G5 > K5){
+    M5 = "Over";
+  } else if(G5 < K5){
+    M5 = "Under";
+  } else if(L4 > K5){
+    M5 = "Over";
+  } else if(L4 < K5){
+    M5 = "Under";
   } else if(M3 === "Above Avg"){
     M5 = "Under";
-  } else if(K5 !== null && L4 < K5 && G5 > K5){
+  } else if(M3 === "Below Avg"){
     M5 = "Over";
-  } else if(K5 !== null && (L4 > K5 || G5 > K5)){
-    M5 = "Under";
-  } else if(K5 !== null && L4 < K5){
-    M5 = "Under";
   } else {
     M5 = "";
   }
