@@ -1393,9 +1393,14 @@ window.simulateGames = simulateGames;
 // from the first game in the sorted list, since a single page load is
 // always one day's slate), not the viewer's own current date. Those two
 // can differ if the page is left open past midnight, or opened again
-// later to review a finished slate. Also stores a compact filename-safe
-// version of the same date (e.g. "7Aug2026") for the PDF export below.
-let reportFilenameDate = "";
+// later to review a finished slate. Also keeps document.title updated
+// continuously to the same dated filename format (rather than only
+// setting it right before printing) — desktop Chrome's print-to-PDF
+// reads document.title live at the moment window.print() fires, but
+// iOS's print pipeline hands off to a separate system process that
+// appears to snapshot the title earlier, missing a last-second change.
+// Keeping it updated at the source instead means iOS's snapshot,        
+// whenever it happens, still catches the right value.
 function updateReportDate(isoDateStr){
   const d = isoDateStr ? new Date(isoDateStr) : new Date();
   const day = d.getDate();
@@ -1403,21 +1408,11 @@ function updateReportDate(isoDateStr){
   const monthShort = d.toLocaleString("en-US", { month: "short" });
   const year = d.getFullYear();
   $("reportDate").textContent = `${day} ${month} ${year}`;
-  reportFilenameDate = `${day}${monthShort}${year}`;
+  document.title = `WNBA Live Score -- Score Sheet_${day}${monthShort}${year}`;
 }
 updateReportDate(); // placeholder (today) until the first successful fetch sets the real game date
 
-const originalDocTitle = document.title;
-$("downloadPdfBtn").addEventListener("click", ()=>{
-  // Most browsers suggest document.title as the default filename when
-  // saving a print-to-PDF, so set it to match the requested naming
-  // pattern right before printing, then restore it once the print
-  // dialog closes (afterprint fires whether the user actually saves or
-  // cancels) so the browser tab's own title isn't left changed.
-  document.title = `WNBA Live Score -- Score Sheet_${reportFilenameDate}`;
-  window.print();
-});
-window.addEventListener("afterprint", ()=>{ document.title = originalDocTitle; });
+$("downloadPdfBtn").addEventListener("click", ()=> window.print());
 
 fetchScores();
 </script>
