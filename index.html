@@ -356,7 +356,7 @@
       &nbsp;&nbsp;<span id="reportDate"></span>
     </span>
   </div>
-  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_53</div>
+  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_54</div>
   <div id="debugLog" class="no-print" style="margin-top:6px;font-size:10.5px;color:#9aa0a6;word-break:break-all;"></div>
 
 </div>
@@ -899,22 +899,23 @@ function applyGameData(gid, away, home, status, overUnder){
   // at which point it freezes and stops updating for the rest of the game.
   if(period === 4 && state === "in"){
     const remaining = parseClockRemaining(status.clock);
-    if(remaining !== null && remaining <= 5 && st.q4Snapshot.away === null){
-      st.q4Snapshot.away = awayQ4Live;
-      st.q4Snapshot.home = homeQ4Live;
-      console.log(`[Q4 live-freeze] ${gid}: froze at clock=${status.clock} -> away=${awayQ4Live}, home=${homeQ4Live}`);
-    } else if(remaining !== null && remaining < 5 && st.q4Snapshot.away === null && !st.backfillAttempted){
-      // We loaded the page after the 5:00 mark already passed — reconstruct
-      // the score as it stood at that moment from play-by-play instead of
-      // guessing with the current (later, higher) score.
+    if(remaining !== null && remaining <= 5 && st.q4Snapshot.away === null && !st.backfillAttempted){
+      // Always reconstruct from real play-by-play, never grab whatever the
+      // live score happens to be at this exact poll — the live score can
+      // be off by a play depending on 5s-polling timing, which used to
+      // freeze an approximate value that reconstruction would then quietly
+      // correct moments later. For a value that has to be right the first
+      // time, only the reconstructed value should ever get frozen; until
+      // it's ready, F2/F3 keep mirroring the live score below (visibly
+      // still moving, not yet frozen) rather than committing to a guess.
       st.backfillAttempted = true;
-      runQ4Backfill(gid, away, home);
+      runQ4Backfill(gid, away, home, true);
     }
   }
   if(period > 4 || state === "post"){
     if(st.q4Snapshot.away === null && !st.backfillAttempted){
       st.backfillAttempted = true;
-      runQ4Backfill(gid, away, home);
+      runQ4Backfill(gid, away, home, false);
     }
   }
 
@@ -1026,7 +1027,15 @@ function scoreboardUrls(){
 // remaining, using ESPN's per-game scoringPlays feed. Needed when the page
 // loads (or first sees this game) after that moment has already passed —
 // the scoreboard endpoint only ever gives the CURRENT score, not history.
-async function backfillQ4Snapshot(gid, away, home){
+// allowRetry=true (the live, just-crossed-5:00 case) means: if ESPN's
+// play-by-play hasn't published a qualifying play yet (a brief lag is
+// normal for a still-live game), don't commit to the fallback value —
+// leave the snapshot unset and retry on the next poll instead, since the
+// real data typically shows up within seconds. allowRetry=false (game
+// already well past that point, or finished) means the data should
+// already be complete, so it's safe to use the fallback immediately
+// rather than retry forever.
+async function backfillQ4Snapshot(gid, away, home, allowRetry){
   const st = gameState[gid];
   if(!st) return;
   const eventId = gid.slice(1); // strip leading "g"
@@ -1084,6 +1093,13 @@ async function backfillQ4Snapshot(gid, away, home){
         st.q4Snapshot.away = awayScore - awayQ13;
         st.q4Snapshot.home = homeScore - homeQ13;
         console.log(`[Q4 backfill] ${gid}: reconstructed from ${scoringPlays.length} plays -> away=${st.q4Snapshot.away}, home=${st.q4Snapshot.home} (raw scores ${awayScore}/${homeScore} at clock ${candidate.clock && candidate.clock.displayValue})`);
+      } else if(allowRetry){
+        // Still live and no qualifying play yet — ESPN's feed likely just
+        // hasn't caught up to the current clock. Don't guess; leave the
+        // snapshot unset and retry on the next poll.
+        console.warn(`[Q4 backfill] ${gid}: no usable Q4 candidate yet (${scoringPlays.length} total plays) — live game, will retry on next poll instead of guessing`);
+        st.backfillAttempted = false;
+        return;
       } else {
         // Play-by-play reconstruction didn't find a usable data point (ESPN's
         // schema isn't consistently documented, so this can legitimately
@@ -1131,7 +1147,7 @@ async function backfillQ4Snapshot(gid, away, home){
 // fake game ID can never match a real ESPN event.
 const simulatedGids = new Map();
 
-async function runQ4Backfill(gid, away, home){
+async function runQ4Backfill(gid, away, home, allowRetry){
   if(simulatedGids.has(gid)){
     const override = simulatedGids.get(gid);
     const st = gameState[gid];
@@ -1156,7 +1172,7 @@ async function runQ4Backfill(gid, away, home){
     }
     return;
   }
-  await backfillQ4Snapshot(gid, away, home);
+  await backfillQ4Snapshot(gid, away, home, allowRetry);
 }
 
 function shortUrl(url){
