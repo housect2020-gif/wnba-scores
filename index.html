@@ -356,7 +356,7 @@
       &nbsp;&nbsp;<span id="reportDate"></span>
     </span>
   </div>
-  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_52</div>
+  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_53</div>
   <div id="debugLog" class="no-print" style="margin-top:6px;font-size:10.5px;color:#9aa0a6;word-break:break-all;"></div>
 
 </div>
@@ -818,8 +818,14 @@ function recalcGame(gid){
   // K4 (Required PPM — Required Points Per Minute) — how many combined
   // points per minute both teams need to average over the remaining time
   // (J3 minutes) to reach the pick (K5). (K5 - I5) / J3.
-  const K4 = K5 === null ? "–" : fmt((K5 - I5) / J3, 2);
-  eg(gid,"K4").innerHTML = K4 === "–" ? "–" : `${K4}<span class="cell-label">PPM</span>`;
+  const K4raw = K5 === null ? null : (K5 - I5) / J3;
+  const K4 = K4raw === null ? "–" : fmt(K4raw, 2);
+  if(K4 === "–"){
+    eg(gid,"K4").innerHTML = "–";
+  } else {
+    const k4Color = K4raw > 4.2 ? "#c62828" : "#2e7d32"; // red above 4.2, green at/below
+    eg(gid,"K4").innerHTML = `<span style="color:${k4Color}">${K4}</span><span class="cell-label">PPM</span>`;
+  }
 
   // M5 (Suggested Pick) — G5 (predicted total) vs K5 (the pick) is the
   // primary signal. This replaced an earlier version that also weighed
