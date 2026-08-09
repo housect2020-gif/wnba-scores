@@ -902,6 +902,7 @@ function applyGameData(gid, away, home, status, overUnder){
     if(remaining !== null && remaining <= 5 && st.q4Snapshot.away === null){
       st.q4Snapshot.away = awayQ4Live;
       st.q4Snapshot.home = homeQ4Live;
+      console.log(`[Q4 live-freeze] ${gid}: froze at clock=${status.clock} -> away=${awayQ4Live}, home=${homeQ4Live}`);
     } else if(remaining !== null && remaining < 5 && st.q4Snapshot.away === null && !st.backfillAttempted){
       // We loaded the page after the 5:00 mark already passed — reconstruct
       // the score as it stood at that moment from play-by-play instead of
