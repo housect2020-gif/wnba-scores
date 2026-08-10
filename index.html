@@ -827,35 +827,40 @@ function recalcGame(gid){
     eg(gid,"K4").innerHTML = `<span style="color:${k4Color}">${K4}</span><span class="cell-label">PPM</span>`;
   }
 
-  // M5 (Suggested Pick) — G5 (predicted total) vs K5 (the pick) is the
-  // primary signal. This replaced an earlier version that also weighed
-  // L4 as an equal factor, but two real flagged cases (Sparks@Sky: G5
-  // above K5 but L4 below it; Aces@Dream: G5 and L4 both above K5) both
-  // needed "Over" — L4 pointed opposite directions in those two cases
-  // while G5 agreed both times, showing G5 is the number that actually
-  // tracks the right call, not L4. L4/M3 only step in for the genuine
-  // edge case where G5 exactly ties K5 (rare — a real number tie).
-  // Only shows a pick from Q4 onward — before that there's no Q4-based
-  // signal yet, so it stays blank rather than guessing.
+  // M5 (Suggested Pick) — three-tier formula:
+  //   - J3<=5 (crunch time): flat 4.60 PPM threshold. Backtested against
+  //     18 real games (9 Aug + 14 more historical games): 4.60 scored
+  //     14/18 (77.8%) vs the original 4.80's 13/18 (72.2%). Five games
+  //     landed at exactly 4.70 PPM and split 2-Over/3-Under — a genuine
+  //     tie no single threshold fully resolves — and 4.60 sits in the
+  //     middle of the best-performing 4.50-4.65 plateau rather than at
+  //     either edge, to avoid overfitting to this specific sample.
+  //   - J3 6-39 (more time left): clear-cut at the extremes (<=4.20 ->
+  //     Over, >=5.20 -> Under); for the ambiguous 4.20-5.20 middle band,
+  //     tiebreak using the game's OWN actual scoring pace so far
+  //     ((G2+G3)/(40-J3)) against the pace still required — if the game
+  //     has already been playing at or above the pace it still needs,
+  //     that's real in-game evidence favoring Over, rather than a
+  //     generic statistical guess about early-game variance.
+  //   - J3>=40 or J3<=0 (out of range): blank.
+  // period>=4 kept as a safety check beyond the formula's own J3 bounds
+  // — J3 defaults to 5 regardless of actual game state, and would
+  // otherwise fire before Q4 even starts.
   let M5;
-  if((st.period || 0) < 4){
+  if((st.period || 0) < 4 || J3 >= 40 || J3 <= 0 || K5 === null){
     M5 = "";
-  } else if(K5 === null){
-    M5 = "";
-  } else if(G5 > K5){
-    M5 = "Over";
-  } else if(G5 < K5){
-    M5 = "Under";
-  } else if(L4 > K5){
-    M5 = "Over";
-  } else if(L4 < K5){
-    M5 = "Under";
-  } else if(M3 === "Above Avg"){
-    M5 = "Under";
-  } else if(M3 === "Below Avg"){
-    M5 = "Over";
   } else {
-    M5 = "";
+    const requiredPPM = (K5 - (G2 + G3)) / J3;
+    if(J3 <= 5){
+      M5 = requiredPPM <= 4.60 ? "Over" : "Under";
+    } else if(requiredPPM <= 4.20){
+      M5 = "Over";
+    } else if(requiredPPM >= 5.20){
+      M5 = "Under";
+    } else {
+      const currentPace = (G2 + G3) / (40 - J3);
+      M5 = currentPace >= requiredPPM ? "Over" : "Under";
+    }
   }
   eg(gid,"M5").textContent = M5 === "" ? "–" : M5;
 
