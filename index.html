@@ -136,6 +136,7 @@
     padding-left:1px;
     padding-right:1px;
   }
+  td.formula, td.avg{white-space:nowrap;}
   td.formula{font-weight:600;}
   td.avg{background:var(--yellow);}
   td.pred-total{background:var(--pink) !important;font-weight:700;}
@@ -356,7 +357,7 @@
       &nbsp;&nbsp;<span id="reportDate"></span>
     </span>
   </div>
-  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_54</div>
+  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_55</div>
   <div id="debugLog" class="no-print" style="margin-top:6px;font-size:10.5px;color:#9aa0a6;word-break:break-all;"></div>
 
 </div>
@@ -823,8 +824,14 @@ function recalcGame(gid){
   if(K4 === "–"){
     eg(gid,"K4").innerHTML = "–";
   } else {
-    const k4Color = K4raw > 4.2 ? "#c62828" : "#2e7d32"; // red above 4.2, green at/below
-    eg(gid,"K4").innerHTML = `<span style="color:${k4Color}">${K4}</span><span class="cell-label">PPM</span>`;
+    // red/high PPM leans Under, green/low PPM leans Over — matches the
+    // same direction M5 uses, though K4 is its own live-updating metric
+    // (uses the current running total, not M5's frozen 5-min snapshot),
+    // so the two won't always agree on the exact number.
+    const k4IsHigh = K4raw > 4.2;
+    const k4Color = k4IsHigh ? "#c62828" : "#2e7d32"; // red above 4.2, green at/below
+    const k4Suffix = k4IsHigh ? "(U)" : "(O)";
+    eg(gid,"K4").innerHTML = `<span style="color:${k4Color}">${K4} ${k4Suffix}</span><span class="cell-label">PPM</span>`;
   }
 
   // M5 (Suggested Pick) — three-tier formula:
