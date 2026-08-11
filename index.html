@@ -360,7 +360,7 @@
       &nbsp;&nbsp;<span id="reportDate"></span>
     </span>
   </div>
-  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_56</div>
+  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_57</div>
   <div id="debugLog" class="no-print" style="margin-top:6px;font-size:10.5px;color:#9aa0a6;word-break:break-all;"></div>
 
 </div>
@@ -822,22 +822,19 @@ function recalcGame(gid){
   // K4 (Required PPM — Required Points Per Minute) — how many combined
   // points per minute both teams need to average over the remaining time
   // (J3 minutes) to reach the pick (K5). (K5 - I5) / J3.
-  // K4 + M5 now share ONE frozen decision, made the moment you're
-  // actually at the crunch-time mark (J3<=5) with a pick entered — that
-  // decision point IS the prediction, so it locks permanently from then
-  // on rather than silently recomputing if J3/K5 get touched again
-  // later. Before that point, both show live-computing values so you
-  // can watch the picture develop, but nothing is "the prediction" yet.
-  //
-  // K4 = Required PPM against the SAME frozen base M5 uses (G2+G3, the
-  // score at the moment Q4 hit 5:00) — no longer the continuously live
-  // running total, so the two stay consistent with each other always,
-  // not just after freezing.
-  //
-  // M5 three-tier formula (see earlier notes for the backtest behind
-  // the 4.60/4.20/5.20 numbers): J3<=5 uses a flat 4.60 PPM threshold;
-  // J3 6-39 uses clear-cut 4.20/5.20 extremes with a self-referential
-  // pace tiebreaker in between; J3>=40 or J3<=0 is out of range.
+  // K4 now shows BOTH a live value and (once locked) the frozen
+  // decision, in the same cell — the live number updates continuously
+  // from Q1 onward (G2/G3 naturally evolve from "score so far" during
+  // Q1-Q3 into the true T=35min snapshot once Q4 hits 5:00, so this is
+  // meaningful the whole game, not just from Q4 on), while the frozen
+  // value is the actual prediction, locked permanently the moment J3
+  // first reaches the crunch-time window (<=5) with a K5 pick entered.
+  // M5 now also shows both a live pick and (once locked) the frozen
+  // pick, matching K4's dual display — same reasoning: G2/G3 evolve
+  // naturally from "score so far" into the true T=35min snapshot, so
+  // the live pick is meaningful the whole game, while the frozen pick
+  // is the actual prediction, locked once J3 first reaches the
+  // crunch-time window (<=5) with a K5 pick entered.
   function computeK4M5(k5, g2, g3, j3){
     if(k5 === null) return { k4raw: null, m5: "" };
     const requiredPPM = (k5 - (g2 + g3)) / j3;
@@ -862,21 +859,41 @@ function recalcGame(gid){
     console.log(`[decision freeze] ${gid}: locked at J3=${J3} -> K4=${st.decisionFrozen.k4raw.toFixed(2)} PPM, M5=${st.decisionFrozen.m5}`);
   }
 
-  const decision = st.decisionFrozen !== null
-    ? st.decisionFrozen
-    : ((st.period || 0) < 4 ? { k4raw: null, m5: "" } : computeK4M5(K5, G2, G3, J3));
+  const live = computeK4M5(K5, G2, G3, J3);
 
-  if(decision.k4raw === null){
+  function k4Span(raw, label){
+    const isHigh = raw > 4.2;
+    const color = isHigh ? "#c62828" : "#2e7d32";
+    const suffix = isHigh ? "(U)" : "(O)";
+    return `<span style="color:${color}">${fmt(raw, 2)} ${suffix}</span><span class="cell-label">${label}</span>`;
+  }
+
+  if(live.k4raw === null){
     eg(gid,"K4").innerHTML = "–";
   } else {
-    const k4IsHigh = decision.k4raw > 4.2;
-    const k4Color = k4IsHigh ? "#c62828" : "#2e7d32";
-    const k4Suffix = k4IsHigh ? "(U)" : "(O)";
-    const frozenTag = st.decisionFrozen !== null ? `<span class="cell-label">FROZEN</span>` : "";
-    eg(gid,"K4").innerHTML = `<span style="color:${k4Color}">${fmt(decision.k4raw, 2)} ${k4Suffix}</span><span class="cell-label">PPM</span>${frozenTag}`;
+    let html = k4Span(live.k4raw, "LIVE PPM");
+    if(st.decisionFrozen !== null){
+      html += "<br>" + k4Span(st.decisionFrozen.k4raw, "FROZEN PPM");
+    }
+    eg(gid,"K4").innerHTML = html;
   }
-  const M5 = decision.m5;
-  eg(gid,"M5").textContent = M5 === "" ? "–" : M5;
+
+  function m5Span(pick, label){
+    if(pick === "") return "";
+    const color = pick === "Over" ? "#2e7d32" : "#c62828";
+    return `<span style="color:${color}">${pick}</span><span class="cell-label">${label}</span>`;
+  }
+
+  if(live.m5 === "" && st.decisionFrozen === null){
+    eg(gid,"M5").innerHTML = "–";
+  } else {
+    let m5Html = m5Span(live.m5, "LIVE PICK");
+    if(st.decisionFrozen !== null){
+      if(m5Html) m5Html += "<br>";
+      m5Html += m5Span(st.decisionFrozen.m5, "FROZEN PICK");
+    }
+    eg(gid,"M5").innerHTML = m5Html || "–";
+  }
 
   // L5 background: green (same as I5) when the J5/K5 pick is currently
   // winning against the live total (I5); pink (same as G5) otherwise.
