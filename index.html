@@ -106,7 +106,10 @@
     background:var(--header-bg);
     color:#5f6368;
     font-weight:500;
-    width:20px;
+    width:14px;
+    white-space:nowrap;
+    padding-left:2px;
+    padding-right:2px;
   }
   .hdr-row th{
     background:#f7f8fa;
@@ -318,7 +321,7 @@
   <div class="sheet-scroll">
     <table>
       <colgroup id="mainColgroup">
-        <col style="width:2.5%"> <!-- rownum -->
+        <col style="width:1.5%"> <!-- rownum -->
         <col style="width:18%">  <!-- Team -->
         <col style="width:4%">   <!-- Q1 -->
         <col style="width:4%">   <!-- Q2 -->
@@ -357,7 +360,7 @@
       &nbsp;&nbsp;<span id="reportDate"></span>
     </span>
   </div>
-  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_55</div>
+  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_56</div>
   <div id="debugLog" class="no-print" style="margin-top:6px;font-size:10.5px;color:#9aa0a6;word-break:break-all;"></div>
 
 </div>
@@ -374,7 +377,7 @@ let extraOTCount = 0;      // number of overtime columns currently rendered (Q5,
 
 function rebuildTableHeader(){
   let colHtml = `
-    <col style="width:2.5%">
+    <col style="width:1.5%">
     <col style="width:18%">
     <col style="width:4%">
     <col style="width:4%">
@@ -590,7 +593,7 @@ function makeGameRowsHtml(gid){
 
 function ensureGameBlock(gid){
   if(gameState[gid]) return;
-  gameState[gid] = { q4Snapshot: { away: null, home: null }, backfillAttempted: false, lastState: "pre" };
+  gameState[gid] = { q4Snapshot: { away: null, home: null }, backfillAttempted: false, lastState: "pre", decisionFrozen: null };
   $("gamesBody").insertAdjacentHTML("beforeend", makeGameRowsHtml(gid));
   ["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3"].forEach(suffix=>{
     eg(gid, suffix).addEventListener("input", ()=>recalcGame(gid));
@@ -819,56 +822,60 @@ function recalcGame(gid){
   // K4 (Required PPM — Required Points Per Minute) — how many combined
   // points per minute both teams need to average over the remaining time
   // (J3 minutes) to reach the pick (K5). (K5 - I5) / J3.
-  const K4raw = K5 === null ? null : (K5 - I5) / J3;
-  const K4 = K4raw === null ? "–" : fmt(K4raw, 2);
-  if(K4 === "–"){
-    eg(gid,"K4").innerHTML = "–";
-  } else {
-    // red/high PPM leans Under, green/low PPM leans Over — matches the
-    // same direction M5 uses, though K4 is its own live-updating metric
-    // (uses the current running total, not M5's frozen 5-min snapshot),
-    // so the two won't always agree on the exact number.
-    const k4IsHigh = K4raw > 4.2;
-    const k4Color = k4IsHigh ? "#c62828" : "#2e7d32"; // red above 4.2, green at/below
-    const k4Suffix = k4IsHigh ? "(U)" : "(O)";
-    eg(gid,"K4").innerHTML = `<span style="color:${k4Color}">${K4} ${k4Suffix}</span><span class="cell-label">PPM</span>`;
+  // K4 + M5 now share ONE frozen decision, made the moment you're
+  // actually at the crunch-time mark (J3<=5) with a pick entered — that
+  // decision point IS the prediction, so it locks permanently from then
+  // on rather than silently recomputing if J3/K5 get touched again
+  // later. Before that point, both show live-computing values so you
+  // can watch the picture develop, but nothing is "the prediction" yet.
+  //
+  // K4 = Required PPM against the SAME frozen base M5 uses (G2+G3, the
+  // score at the moment Q4 hit 5:00) — no longer the continuously live
+  // running total, so the two stay consistent with each other always,
+  // not just after freezing.
+  //
+  // M5 three-tier formula (see earlier notes for the backtest behind
+  // the 4.60/4.20/5.20 numbers): J3<=5 uses a flat 4.60 PPM threshold;
+  // J3 6-39 uses clear-cut 4.20/5.20 extremes with a self-referential
+  // pace tiebreaker in between; J3>=40 or J3<=0 is out of range.
+  function computeK4M5(k5, g2, g3, j3){
+    if(k5 === null) return { k4raw: null, m5: "" };
+    const requiredPPM = (k5 - (g2 + g3)) / j3;
+    let m5;
+    if(j3 >= 40 || j3 <= 0){
+      m5 = "";
+    } else if(j3 <= 5){
+      m5 = requiredPPM <= 4.60 ? "Over" : "Under";
+    } else if(requiredPPM <= 4.20){
+      m5 = "Over";
+    } else if(requiredPPM >= 5.20){
+      m5 = "Under";
+    } else {
+      const currentPace = (g2 + g3) / (40 - j3);
+      m5 = currentPace >= requiredPPM ? "Over" : "Under";
+    }
+    return { k4raw: requiredPPM, m5 };
   }
 
-  // M5 (Suggested Pick) — three-tier formula:
-  //   - J3<=5 (crunch time): flat 4.60 PPM threshold. Backtested against
-  //     18 real games (9 Aug + 14 more historical games): 4.60 scored
-  //     14/18 (77.8%) vs the original 4.80's 13/18 (72.2%). Five games
-  //     landed at exactly 4.70 PPM and split 2-Over/3-Under — a genuine
-  //     tie no single threshold fully resolves — and 4.60 sits in the
-  //     middle of the best-performing 4.50-4.65 plateau rather than at
-  //     either edge, to avoid overfitting to this specific sample.
-  //   - J3 6-39 (more time left): clear-cut at the extremes (<=4.20 ->
-  //     Over, >=5.20 -> Under); for the ambiguous 4.20-5.20 middle band,
-  //     tiebreak using the game's OWN actual scoring pace so far
-  //     ((G2+G3)/(40-J3)) against the pace still required — if the game
-  //     has already been playing at or above the pace it still needs,
-  //     that's real in-game evidence favoring Over, rather than a
-  //     generic statistical guess about early-game variance.
-  //   - J3>=40 or J3<=0 (out of range): blank.
-  // period>=4 kept as a safety check beyond the formula's own J3 bounds
-  // — J3 defaults to 5 regardless of actual game state, and would
-  // otherwise fire before Q4 even starts.
-  let M5;
-  if((st.period || 0) < 4 || J3 >= 40 || J3 <= 0 || K5 === null){
-    M5 = "";
-  } else {
-    const requiredPPM = (K5 - (G2 + G3)) / J3;
-    if(J3 <= 5){
-      M5 = requiredPPM <= 4.60 ? "Over" : "Under";
-    } else if(requiredPPM <= 4.20){
-      M5 = "Over";
-    } else if(requiredPPM >= 5.20){
-      M5 = "Under";
-    } else {
-      const currentPace = (G2 + G3) / (40 - J3);
-      M5 = currentPace >= requiredPPM ? "Over" : "Under";
-    }
+  if(st.decisionFrozen === null && (st.period || 0) >= 4 && K5 !== null && J3 <= 5 && J3 > 0){
+    st.decisionFrozen = computeK4M5(K5, G2, G3, J3);
+    console.log(`[decision freeze] ${gid}: locked at J3=${J3} -> K4=${st.decisionFrozen.k4raw.toFixed(2)} PPM, M5=${st.decisionFrozen.m5}`);
   }
+
+  const decision = st.decisionFrozen !== null
+    ? st.decisionFrozen
+    : ((st.period || 0) < 4 ? { k4raw: null, m5: "" } : computeK4M5(K5, G2, G3, J3));
+
+  if(decision.k4raw === null){
+    eg(gid,"K4").innerHTML = "–";
+  } else {
+    const k4IsHigh = decision.k4raw > 4.2;
+    const k4Color = k4IsHigh ? "#c62828" : "#2e7d32";
+    const k4Suffix = k4IsHigh ? "(U)" : "(O)";
+    const frozenTag = st.decisionFrozen !== null ? `<span class="cell-label">FROZEN</span>` : "";
+    eg(gid,"K4").innerHTML = `<span style="color:${k4Color}">${fmt(decision.k4raw, 2)} ${k4Suffix}</span><span class="cell-label">PPM</span>${frozenTag}`;
+  }
+  const M5 = decision.m5;
   eg(gid,"M5").textContent = M5 === "" ? "–" : M5;
 
   // L5 background: green (same as I5) when the J5/K5 pick is currently
