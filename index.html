@@ -238,21 +238,22 @@
   }
   .k5-select{
     display:inline-block !important;
-    width:14px !important;
-    max-width:14px;
+    width:18px !important;
+    max-width:18px;
     flex:0 0 auto;
     margin:0 !important;
     border:1px solid #c7cad0;
     border-radius:3px;
     background:#f4f5f7;
-    text-align:center;
     font-size:9px;
-    padding:2px 0px;
+    padding:2px 0px 2px 2px;
     font-family:inherit;
-    color:transparent; /* hides the closed box's own selected-value text */
+    text-indent:-9999px; /* pushes the closed box's own selected-value text fully off-screen */
+    overflow:hidden;
   }
   .k5-select option{
     color:#202124; /* the popup list itself still needs to be readable */
+    text-indent:0;
   }
   .k5-suffix{
     flex:0 0 auto;
@@ -366,7 +367,7 @@
       &nbsp;&nbsp;<span id="reportDate"></span>
     </span>
   </div>
-  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_59</div>
+  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_58</div>
   <div id="debugLog" class="no-print" style="margin-top:6px;font-size:10.5px;color:#9aa0a6;word-break:break-all;"></div>
 
 </div>
