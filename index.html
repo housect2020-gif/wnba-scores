@@ -360,7 +360,7 @@
       &nbsp;&nbsp;<span id="reportDate"></span>
     </span>
   </div>
-  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_57</div>
+  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_58</div>
   <div id="debugLog" class="no-print" style="margin-top:6px;font-size:10.5px;color:#9aa0a6;word-break:break-all;"></div>
 
 </div>
@@ -717,8 +717,8 @@ function recalcGame(gid){
   eg(gid,"G2").textContent = fmt(G2);
   eg(gid,"I2").textContent = fmt(I2);
 
-  // Row 3 (Home) — E3 formula references row2 cells per spec
-  const E3 = D2===0 ? (B2+C2)/2 : (B2+C2+D2)/3;
+  // Row 3 (Home)
+  const E3 = D3===0 ? (B3+C3)/2 : (B3+C3+D3)/3;
   const G3 = B3+C3+D3+F3;
   const I3 = B3+C3+D3+H3+otHome;
   eg(gid,"E3").textContent = fmt(E3);
