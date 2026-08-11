@@ -158,6 +158,27 @@
     font-size:9.5px;
     line-height:1.25;
   }
+  .lock-btn{
+    display:block;
+    margin:3px auto 0;
+    padding:1px 8px;
+    font-size:8px;
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:0.03em;
+    border:1px solid #c7cad0;
+    border-radius:3px;
+    background:#fff;
+    color:#3c4043;
+    cursor:pointer;
+  }
+  .lock-btn:hover{background:#f1f3f4;}
+  .lock-btn:disabled{
+    background:#e8f0e8;
+    color:#2e7d32;
+    border-color:#c8e9d1;
+    cursor:default;
+  }
   .light-yellow{color:#d4b700 !important;}
   select.light-yellow{color:#d4b700;}
   td.matchup-label{
@@ -369,7 +390,7 @@
       &nbsp;&nbsp;<span id="reportDate"></span>
     </span>
   </div>
-  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_60</div>
+  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_61</div>
   <div id="debugLog" class="no-print" style="margin-top:6px;font-size:10.5px;color:#9aa0a6;word-break:break-all;"></div>
 
 </div>
@@ -563,7 +584,10 @@ function makeGameRowsHtml(gid){
       ${otCellsRow4}
       <td class="blank"></td>
       <td class="formula" id="${gid}-J4">–</td>
-      <td class="formula k4-cell" id="${gid}-K4">–</td>
+      <td class="formula k4-cell">
+        <span id="${gid}-K4"></span>
+        <button type="button" class="lock-btn no-print" id="${gid}-lockBtn" title="Lock this prediction now">Lock</button>
+      </td>
       <td class="formula light-yellow" id="${gid}-L4">–</td>
       <td class="blank"></td>
     </tr>
@@ -605,7 +629,13 @@ function makeGameRowsHtml(gid){
 function ensureGameBlock(gid){
   if(gameState[gid]) return;
   gameState[gid] = { q4Snapshot: { away: null, home: null }, backfillAttempted: false, lastState: "pre", decisionFrozen: null };
+  const savedFrozen = loadField(gid, "decisionFrozen");
+  if(savedFrozen !== null){
+    try{ gameState[gid].decisionFrozen = JSON.parse(savedFrozen); }
+    catch(e){ /* corrupted/old data — ignore, stays unlocked */ }
+  }
   $("gamesBody").insertAdjacentHTML("beforeend", makeGameRowsHtml(gid));
+  eg(gid, "lockBtn").addEventListener("click", ()=> lockDecision(gid));
   ["B2","C2","D2","F2","H2","B3","C3","D3","F3","H3"].forEach(suffix=>{
     eg(gid, suffix).addEventListener("input", ()=>recalcGame(gid));
   });
@@ -708,6 +738,52 @@ function rebuildK5Options(gid, center, preferredValue){
   // set to — this is what stays visible; the select itself keeps its own
   // text hidden via CSS and exists only as the picker mechanism.
   if(displayEl) displayEl.value = selectEl.value;
+}
+
+// Required PPM + the resulting M5 pick — shared by recalcGame (for the
+// live-updating display) and lockDecision (for the manually-locked
+// frozen decision), so both always use the exact same formula. Formula:
+// K4 = (K5 - I5) / J3 conceptually, but using the frozen T=35min base
+// (g2+g3) instead of the live running total. M5 three-tier logic: J3<=5
+// uses a flat 4.60 PPM threshold; J3 6-39 uses clear-cut 4.20/5.20
+// extremes with a self-referential pace tiebreaker in between; J3>=40
+// or J3<=0 is out of range.
+function computeK4M5(k5, g2, g3, j3){
+  if(k5 === null) return { k4raw: null, m5: "" };
+  const requiredPPM = (k5 - (g2 + g3)) / j3;
+  let m5;
+  if(j3 >= 40 || j3 <= 0){
+    m5 = "";
+  } else if(j3 <= 5){
+    m5 = requiredPPM <= 4.60 ? "Over" : "Under";
+  } else if(requiredPPM <= 4.20){
+    m5 = "Over";
+  } else if(requiredPPM >= 5.20){
+    m5 = "Under";
+  } else {
+    const currentPace = (g2 + g3) / (40 - j3);
+    m5 = currentPace >= requiredPPM ? "Over" : "Under";
+  }
+  return { k4raw: requiredPPM, m5 };
+}
+
+// Manually locks in the K4/M5 decision for a game, using whatever K5/J3
+// are showing at the exact moment the button is clicked — this replaced
+// an earlier automatic freeze that could lock in a preliminary/still-
+// being-typed K5 value instead of the user's actual final pick.
+function lockDecision(gid){
+  const st = gameState[gid];
+  if(!st || st.decisionFrozen !== null) return;
+  const k5Raw = eg(gid, "K5").value;
+  const k5 = k5Raw === "" ? null : Number(k5Raw) + 0.5;
+  if(k5 === null) return; // nothing to lock without a pick
+  const g2 = num(eg(gid,"B2").value) + num(eg(gid,"C2").value) + num(eg(gid,"D2").value) + num(eg(gid,"F2").value);
+  const g3 = num(eg(gid,"B3").value) + num(eg(gid,"C3").value) + num(eg(gid,"D3").value) + num(eg(gid,"F3").value);
+  const j3 = Number(eg(gid,"J3").value) || 5;
+  st.decisionFrozen = computeK4M5(k5, g2, g3, j3);
+  saveField(gid, "decisionFrozen", JSON.stringify(st.decisionFrozen));
+  console.log(`[decision lock] ${gid}: manually locked at J3=${j3}, K5=${k5} -> K4=${st.decisionFrozen.k4raw.toFixed(2)} PPM, M5=${st.decisionFrozen.m5}`);
+  recalcGame(gid);
 }
 
 function recalcGame(gid){
@@ -830,45 +906,18 @@ function recalcGame(gid){
   const L5 = K5 === null ? "–" : fmt(Math.abs(K5 - I5), 1);
   eg(gid,"L5").textContent = L5;
 
-  // K4 (Required PPM — Required Points Per Minute) — how many combined
-  // points per minute both teams need to average over the remaining time
-  // (J3 minutes) to reach the pick (K5). (K5 - I5) / J3.
-  // K4 now shows BOTH a live value and (once locked) the frozen
-  // decision, in the same cell — the live number updates continuously
-  // from Q1 onward (G2/G3 naturally evolve from "score so far" during
-  // Q1-Q3 into the true T=35min snapshot once Q4 hits 5:00, so this is
-  // meaningful the whole game, not just from Q4 on), while the frozen
-  // value is the actual prediction, locked permanently the moment J3
-  // first reaches the crunch-time window (<=5) with a K5 pick entered.
-  // M5 now also shows both a live pick and (once locked) the frozen
-  // pick, matching K4's dual display — same reasoning: G2/G3 evolve
-  // naturally from "score so far" into the true T=35min snapshot, so
-  // the live pick is meaningful the whole game, while the frozen pick
-  // is the actual prediction, locked once J3 first reaches the
-  // crunch-time window (<=5) with a K5 pick entered.
-  function computeK4M5(k5, g2, g3, j3){
-    if(k5 === null) return { k4raw: null, m5: "" };
-    const requiredPPM = (k5 - (g2 + g3)) / j3;
-    let m5;
-    if(j3 >= 40 || j3 <= 0){
-      m5 = "";
-    } else if(j3 <= 5){
-      m5 = requiredPPM <= 4.60 ? "Over" : "Under";
-    } else if(requiredPPM <= 4.20){
-      m5 = "Over";
-    } else if(requiredPPM >= 5.20){
-      m5 = "Under";
-    } else {
-      const currentPace = (g2 + g3) / (40 - j3);
-      m5 = currentPace >= requiredPPM ? "Over" : "Under";
-    }
-    return { k4raw: requiredPPM, m5 };
-  }
+  // K4 shows a live value (updates continuously from Q1 onward — G2/G3
+  // naturally evolve from "score so far" into the true T=35min snapshot
+  // once Q4 hits 5:00) plus, once manually locked via the Lock button,
+  // the frozen decision alongside it. M5 mirrors the same live+frozen
+  // pattern. See computeK4M5/lockDecision above (module scope) for the
+  // shared formula and the freeze mechanism itself.
 
-  if(st.decisionFrozen === null && (st.period || 0) >= 4 && K5 !== null && J3 <= 5 && J3 > 0){
-    st.decisionFrozen = computeK4M5(K5, G2, G3, J3);
-    console.log(`[decision freeze] ${gid}: locked at J3=${J3} -> K4=${st.decisionFrozen.k4raw.toFixed(2)} PPM, M5=${st.decisionFrozen.m5}`);
-  }
+  // Freezing is now a manual action (see lockDecision below) rather than
+  // automatic — the auto-trigger was locking in whatever K5 happened to
+  // exist the instant J3<=5 was reached, which could be a preliminary/
+  // still-being-typed value rather than the actual final pick. A button
+  // puts the exact moment of commitment in your hands instead.
 
   const live = computeK4M5(K5, G2, G3, J3);
 
@@ -887,6 +936,17 @@ function recalcGame(gid){
       html += "<br>" + k4Span(st.decisionFrozen.k4raw, "FROZEN PPM");
     }
     eg(gid,"K4").innerHTML = html;
+  }
+
+  const lockBtnEl = eg(gid, "lockBtn");
+  if(lockBtnEl){
+    if(st.decisionFrozen !== null){
+      lockBtnEl.textContent = "Locked \u2713";
+      lockBtnEl.disabled = true;
+    } else {
+      lockBtnEl.textContent = "Lock";
+      lockBtnEl.disabled = (K5 === null); // nothing meaningful to lock without a pick entered
+    }
   }
 
   function m5Span(pick, label){
