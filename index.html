@@ -217,11 +217,13 @@
     text-align-last:center;
   }
   .k5-cell{
+    vertical-align:middle;
+  }
+  .k5-inner{
     display:flex;
     align-items:center;
     justify-content:center;
     gap:3px;
-    vertical-align:middle;
   }
   .k5-manual{
     display:inline-block !important;
@@ -367,7 +369,7 @@
       &nbsp;&nbsp;<span id="reportDate"></span>
     </span>
   </div>
-  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_59</div>
+  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_60</div>
   <div id="debugLog" class="no-print" style="margin-top:6px;font-size:10.5px;color:#9aa0a6;word-break:break-all;"></div>
 
 </div>
@@ -585,11 +587,13 @@ function makeGameRowsHtml(gid){
         </select>
       </td>
       <td class="k5-cell">
-        <input type="text" inputmode="numeric" pattern="[0-9]*" class="k5-manual" id="${gid}-K5manual" placeholder="Total" autocomplete="off">
-        <span class="k5-suffix">.5</span>
-        <select class="k5-select" id="${gid}-K5">
-          <option value="">–</option>
-        </select>
+        <div class="k5-inner">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" class="k5-manual" id="${gid}-K5manual" placeholder="Total" autocomplete="off">
+          <span class="k5-suffix">.5</span>
+          <select class="k5-select" id="${gid}-K5">
+            <option value="">–</option>
+          </select>
+        </div>
       </td>
       <td class="formula" id="${gid}-L5">–</td>
       <td class="formula" id="${gid}-M5">–</td>
