@@ -390,7 +390,7 @@
       &nbsp;&nbsp;<span id="reportDate"></span>
     </span>
   </div>
-  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_62</div>
+  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_61</div>
   <div id="debugLog" class="no-print" style="margin-top:6px;font-size:10.5px;color:#9aa0a6;word-break:break-all;"></div>
 
 </div>
@@ -620,7 +620,7 @@ function makeGameRowsHtml(gid){
         </div>
       </td>
       <td class="formula" id="${gid}-L5">–</td>
-      <td class="formula" id="${gid}-M5">–</td>
+      <td class="formula k4-cell" id="${gid}-M5">–</td>
     </tr>
     <tr class="spacer-row"><td colspan="${14 + extraOTCount}"></td></tr>
   `;
@@ -631,7 +631,18 @@ function ensureGameBlock(gid){
   gameState[gid] = { q4Snapshot: { away: null, home: null }, backfillAttempted: false, lastState: "pre", decisionFrozen: null };
   const savedFrozen = loadField(gid, "decisionFrozen");
   if(savedFrozen !== null){
-    try{ gameState[gid].decisionFrozen = JSON.parse(savedFrozen); }
+    try{
+      const parsed = JSON.parse(savedFrozen);
+      // Migrate old schema ({k4raw, m5}, from before the consensus
+      // formula existed) to the current one — old locks still render
+      // correctly, just without a consensus value (never computed then).
+      if(parsed.m5Ppm === undefined && parsed.m5 !== undefined){
+        parsed.m5Ppm = parsed.m5;
+        parsed.m5Consensus = "";
+        delete parsed.m5;
+      }
+      gameState[gid].decisionFrozen = parsed;
+    }
     catch(e){ /* corrupted/old data — ignore, stays unlocked */ }
   }
   $("gamesBody").insertAdjacentHTML("beforeend", makeGameRowsHtml(gid));
@@ -748,41 +759,77 @@ function rebuildK5Options(gid, center, preferredValue){
 // uses a flat 4.60 PPM threshold; J3 6-39 uses clear-cut 4.20/5.20
 // extremes with a self-referential pace tiebreaker in between; J3>=40
 // or J3<=0 is out of range.
-function computeK4M5(k5, g2, g3, j3){
-  if(k5 === null) return { k4raw: null, m5: "" };
+// Both prediction formulas, computed and locked together — same moment
+// of commitment, two different methods:
+//   - PPM (k4raw/m5Ppm): Required PPM vs a tiered threshold. Backtested
+//     at 14/18 (77.8%) on real games — see earlier notes for the
+//     4.60/4.20/5.20 numbers and the pace tiebreaker.
+//   - Consensus (m5Consensus): average of E5/G5/L4 (three independent
+//     full-game projections) vs K5. Backtested at 12/18 (66.7%) with NO
+//     margin/blowout adjustment — a margin-based override was tested
+//     and made accuracy WORSE (down to 9/18, 50%), so it was
+//     deliberately left out despite being intuitively appealing.
+function computeDecision(k5, g2, g3, j3, e5, g5, l4){
+  if(k5 === null) return { k4raw: null, m5Ppm: "", m5Consensus: "" };
   const requiredPPM = (k5 - (g2 + g3)) / j3;
-  let m5;
+  let m5Ppm;
   if(j3 >= 40 || j3 <= 0){
-    m5 = "";
+    m5Ppm = "";
   } else if(j3 <= 5){
-    m5 = requiredPPM <= 4.60 ? "Over" : "Under";
+    m5Ppm = requiredPPM <= 4.60 ? "Over" : "Under";
   } else if(requiredPPM <= 4.20){
-    m5 = "Over";
+    m5Ppm = "Over";
   } else if(requiredPPM >= 5.20){
-    m5 = "Under";
+    m5Ppm = "Under";
   } else {
     const currentPace = (g2 + g3) / (40 - j3);
-    m5 = currentPace >= requiredPPM ? "Over" : "Under";
+    m5Ppm = currentPace >= requiredPPM ? "Over" : "Under";
   }
-  return { k4raw: requiredPPM, m5 };
+  const consensus = (e5 + g5 + l4) / 3;
+  const m5Consensus = consensus > k5 ? "Over" : "Under";
+  return { k4raw: requiredPPM, m5Ppm, m5Consensus };
 }
 
-// Manually locks in the K4/M5 decision for a game, using whatever K5/J3
+// Manually locks in the decision for a game, using whatever K5/J3/E5/G5/L4
 // are showing at the exact moment the button is clicked — this replaced
 // an earlier automatic freeze that could lock in a preliminary/still-
 // being-typed K5 value instead of the user's actual final pick.
 function lockDecision(gid){
   const st = gameState[gid];
   if(!st || st.decisionFrozen !== null) return;
+  // The real Q4=5:00 snapshot (F2/F3) takes a brief round-trip to ESPN's
+  // play-by-play to actually confirm once the clock crosses 5:00 — in
+  // that narrow window, G2/G3 are still mirroring the live, still-rising
+  // score, not yet the true frozen value. Locking during that window
+  // would capture an inflated/understated snapshot instead of the real
+  // one. Block until it's actually confirmed rather than risk that.
+  if((st.period || 0) >= 4 && st.q4Snapshot.away === null){
+    alert("The Q4 5:00-mark score hasn't been confirmed yet (still finalizing from play-by-play) — wait a few seconds and try Lock again.");
+    console.warn(`[decision lock] ${gid}: blocked — Q4 snapshot not yet confirmed (still mirroring live).`);
+    return;
+  }
   const k5Raw = eg(gid, "K5").value;
   const k5 = k5Raw === "" ? null : Number(k5Raw) + 0.5;
   if(k5 === null) return; // nothing to lock without a pick
-  const g2 = num(eg(gid,"B2").value) + num(eg(gid,"C2").value) + num(eg(gid,"D2").value) + num(eg(gid,"F2").value);
-  const g3 = num(eg(gid,"B3").value) + num(eg(gid,"C3").value) + num(eg(gid,"D3").value) + num(eg(gid,"F3").value);
+
+  const B2=num(eg(gid,"B2").value), C2=num(eg(gid,"C2").value), D2=num(eg(gid,"D2").value), F2=num(eg(gid,"F2").value);
+  const B3=num(eg(gid,"B3").value), C3=num(eg(gid,"C3").value), D3=num(eg(gid,"D3").value), F3=num(eg(gid,"F3").value);
+  const g2 = B2+C2+D2+F2, g3 = B3+C3+D3+F3;
   const j3 = Number(eg(gid,"J3").value) || 5;
-  st.decisionFrozen = computeK4M5(k5, g2, g3, j3);
+
+  // Replicate recalcGame's E5/G5/L4 formulas exactly (see there for the
+  // full derivation) so the locked consensus pick matches what's shown.
+  const B4=B2+B3, C4=C2+C3, D4=D2+D3, F4=F2+F3;
+  const B5=(B4/10)*40, C5=(C4/10)*40, D5=(D4/10)*40;
+  const e5 = (B5+C5+D5)/3;
+  const validQtrs = [B5,C5,D5].filter(v => !isNaN(v)).length;
+  const g5 = (B5+C5+D5 + ((F4*2)/10)*40) / (validQtrs+1);
+  const timeLeftDenom = 40 - j3;
+  const l4 = timeLeftDenom !== 0 ? mround((g2+g3)*(40/timeLeftDenom), 0.5) : NaN;
+
+  st.decisionFrozen = computeDecision(k5, g2, g3, j3, e5, g5, l4);
   saveField(gid, "decisionFrozen", JSON.stringify(st.decisionFrozen));
-  console.log(`[decision lock] ${gid}: manually locked at J3=${j3}, K5=${k5} -> K4=${st.decisionFrozen.k4raw.toFixed(2)} PPM, M5=${st.decisionFrozen.m5}`);
+  console.log(`[decision lock] ${gid}: manually locked at J3=${j3}, K5=${k5} -> K4=${st.decisionFrozen.k4raw.toFixed(2)} PPM (${st.decisionFrozen.m5Ppm}), Consensus=${st.decisionFrozen.m5Consensus}`);
   recalcGame(gid);
 }
 
@@ -910,7 +957,7 @@ function recalcGame(gid){
   // naturally evolve from "score so far" into the true T=35min snapshot
   // once Q4 hits 5:00) plus, once manually locked via the Lock button,
   // the frozen decision alongside it. M5 mirrors the same live+frozen
-  // pattern. See computeK4M5/lockDecision above (module scope) for the
+  // pattern. See computeDecision/lockDecision above (module scope) for the
   // shared formula and the freeze mechanism itself.
 
   // Freezing is now a manual action (see lockDecision below) rather than
@@ -919,34 +966,40 @@ function recalcGame(gid){
   // still-being-typed value rather than the actual final pick. A button
   // puts the exact moment of commitment in your hands instead.
 
-  const live = computeK4M5(K5, G2, G3, J3);
+  const live = computeDecision(K5, G2, G3, J3, E5, G5, L4);
 
   function k4Span(raw, pick, label){
     let color, suffix;
     if(pick === "Over"){ color = "#2e7d32"; suffix = "(O)"; }
     else if(pick === "Under"){ color = "#c62828"; suffix = "(U)"; }
-    else { color = "#9aa0a6"; suffix = "(–)"; } // no valid M5 signal (J3 out of range)
+    else { color = "#9aa0a6"; suffix = "(–)"; } // no valid pick signal (J3 out of range)
     return `<span style="color:${color}">${fmt(raw, 2)} ${suffix}</span><span class="cell-label">${label}</span>`;
   }
 
   if(live.k4raw === null){
     eg(gid,"K4").innerHTML = "–";
   } else {
-    let html = k4Span(live.k4raw, live.m5, "LIVE PPM");
+    let html = k4Span(live.k4raw, live.m5Ppm, "LIVE PPM");
     if(st.decisionFrozen !== null){
-      html += "<br>" + k4Span(st.decisionFrozen.k4raw, st.decisionFrozen.m5, "FROZEN PPM");
+      html += "<br>" + k4Span(st.decisionFrozen.k4raw, st.decisionFrozen.m5Ppm, "FROZEN PPM");
     }
     eg(gid,"K4").innerHTML = html;
   }
 
   const lockBtnEl = eg(gid, "lockBtn");
   if(lockBtnEl){
+    const waitingOnSnapshot = (st.period || 0) >= 4 && st.q4Snapshot.away === null;
     if(st.decisionFrozen !== null){
       lockBtnEl.textContent = "Locked \u2713";
       lockBtnEl.disabled = true;
+    } else if(waitingOnSnapshot){
+      lockBtnEl.textContent = "Waiting\u2026";
+      lockBtnEl.disabled = true;
+      lockBtnEl.title = "Waiting for the Q4 5:00-mark score to be confirmed from play-by-play";
     } else {
       lockBtnEl.textContent = "Lock";
       lockBtnEl.disabled = (K5 === null); // nothing meaningful to lock without a pick entered
+      lockBtnEl.title = "Lock this prediction now";
     }
   }
 
@@ -956,15 +1009,25 @@ function recalcGame(gid){
     return `<span style="color:${color}">${pick}</span><span class="cell-label">${label}</span>`;
   }
 
-  if(live.m5 === "" && st.decisionFrozen === null){
+  // M5 now shows BOTH formulas side by side: PPM (77.8% backtested) and
+  // Consensus — average of E5/G5/L4 vs K5, 66.7% backtested, no margin
+  // rule (one was tested and made accuracy worse, so it was left out
+  // despite being intuitively appealing — see project notes). Each has
+  // its own live + frozen pair, all locked together by one Lock click.
+  const noSignalYet = live.m5Ppm === "" && live.m5Consensus === "" && st.decisionFrozen === null;
+  if(noSignalYet){
     eg(gid,"M5").innerHTML = "–";
   } else {
-    let m5Html = m5Span(live.m5, "LIVE PICK");
+    let parts = [];
+    const livePpmSpan = m5Span(live.m5Ppm, "LIVE PICK (PPM)");
+    const liveConsensusSpan = m5Span(live.m5Consensus, "LIVE PICK (CONSENSUS)");
+    if(livePpmSpan) parts.push(livePpmSpan);
+    if(liveConsensusSpan) parts.push(liveConsensusSpan);
     if(st.decisionFrozen !== null){
-      if(m5Html) m5Html += "<br>";
-      m5Html += m5Span(st.decisionFrozen.m5, "FROZEN PICK");
+      parts.push(m5Span(st.decisionFrozen.m5Ppm, "FROZEN PICK (PPM)"));
+      parts.push(m5Span(st.decisionFrozen.m5Consensus, "FROZEN PICK (CONSENSUS)"));
     }
-    eg(gid,"M5").innerHTML = m5Html || "–";
+    eg(gid,"M5").innerHTML = parts.filter(p => p).join("<br>") || "–";
   }
 
   // L5 background: green (same as I5) when the J5/K5 pick is currently
