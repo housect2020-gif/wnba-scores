@@ -921,19 +921,20 @@ function recalcGame(gid){
 
   const live = computeK4M5(K5, G2, G3, J3);
 
-  function k4Span(raw, label){
-    const isHigh = raw > 4.2;
-    const color = isHigh ? "#c62828" : "#2e7d32";
-    const suffix = isHigh ? "(U)" : "(O)";
+  function k4Span(raw, pick, label){
+    let color, suffix;
+    if(pick === "Over"){ color = "#2e7d32"; suffix = "(O)"; }
+    else if(pick === "Under"){ color = "#c62828"; suffix = "(U)"; }
+    else { color = "#9aa0a6"; suffix = "(–)"; } // no valid M5 signal (J3 out of range)
     return `<span style="color:${color}">${fmt(raw, 2)} ${suffix}</span><span class="cell-label">${label}</span>`;
   }
 
   if(live.k4raw === null){
     eg(gid,"K4").innerHTML = "–";
   } else {
-    let html = k4Span(live.k4raw, "LIVE PPM");
+    let html = k4Span(live.k4raw, live.m5, "LIVE PPM");
     if(st.decisionFrozen !== null){
-      html += "<br>" + k4Span(st.decisionFrozen.k4raw, "FROZEN PPM");
+      html += "<br>" + k4Span(st.decisionFrozen.k4raw, st.decisionFrozen.m5, "FROZEN PPM");
     }
     eg(gid,"K4").innerHTML = html;
   }
