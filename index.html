@@ -369,7 +369,7 @@
       &nbsp;&nbsp;<span id="reportDate"></span>
     </span>
   </div>
-  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_64</div>
+  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_61</div>
   <div id="debugLog" class="no-print" style="margin-top:6px;font-size:10.5px;color:#9aa0a6;word-break:break-all;"></div>
 
 </div>
@@ -565,7 +565,7 @@ function makeGameRowsHtml(gid){
       <td class="formula" id="${gid}-J4">–</td>
       <td class="formula k4-cell" id="${gid}-K4">–</td>
       <td class="formula light-yellow" id="${gid}-L4">–</td>
-      <td class="blank"></td>
+      <td class="formula" id="${gid}-M4">–</td>
     </tr>
     <tr>
       <td class="rownum">${r5}</td>
@@ -867,6 +867,38 @@ function recalcGame(gid){
 
   const L5 = K5 === null ? "–" : fmt(Math.abs(K5 - I5), 1);
   eg(gid,"L5").textContent = L5;
+
+  // M4 — ported exactly from the given Excel formula:
+  // IF(OR(ISBLANK(F2),ISBLANK(F3)),"",
+  //   IF(M3="Above Avg","Under",
+  //   IF(M3="Below Avg","Over",
+  //   IF(F4<=9,"Over",
+  //   IF(K5>G5,"Over","Under")))))
+  // This is a separate, independent formula from K4/M5 (PPM and
+  // Consensus) — a third opinion shown side by side for comparison, not
+  // a replacement for either.
+  const F2isBlank = eg(gid,"F2").value === "";
+  const F3isBlank = eg(gid,"F3").value === "";
+  let M4;
+  if(F2isBlank || F3isBlank){
+    M4 = "";
+  } else if(M3 === "Above Avg"){
+    M4 = "Under";
+  } else if(M3 === "Below Avg"){
+    M4 = "Over";
+  } else if(F4 <= 9){
+    M4 = "Over";
+  } else if(K5 !== null && K5 > G5){
+    M4 = "Over";
+  } else {
+    M4 = "Under";
+  }
+  if(M4 === ""){
+    eg(gid,"M4").textContent = "–";
+  } else {
+    const m4Color = M4 === "Over" ? "#2e7d32" : "#c62828";
+    eg(gid,"M4").innerHTML = `<span style="color:${m4Color}">${M4}</span>`;
+  }
 
   // K4/M5 are live-only — always computed fresh on every poll from
   // whatever G2/G3/J3/K5 currently are (no locking/freezing mechanism;
