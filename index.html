@@ -369,7 +369,7 @@
       &nbsp;&nbsp;<span id="reportDate"></span>
     </span>
   </div>
-  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_65</div>
+  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_61</div>
   <div id="debugLog" class="no-print" style="margin-top:6px;font-size:10.5px;color:#9aa0a6;word-break:break-all;"></div>
 
 </div>
@@ -868,19 +868,24 @@ function recalcGame(gid){
   const L5 = K5 === null ? "–" : fmt(Math.abs(K5 - I5), 1);
   eg(gid,"L5").textContent = L5;
 
-  // M4 — ported exactly from the given Excel formula:
+  // M4 — ported from the given Excel formula:
   // IF(OR(ISBLANK(F2),ISBLANK(F3)),"",
   //   IF(M3="Above Avg","Under",
   //   IF(M3="Below Avg","Over",
   //   IF(F4<=9,"Over",
   //   IF(K5>G5,"Over","Under")))))
+  // The ISBLANK(F2)/ISBLANK(F3) gate doesn't work as intended here: on
+  // this site F2/F3 are pre-filled with 0 (not left truly empty) before
+  // Q4 even starts, and ISBLANK(0) is false in Excel too — a 0 isn't
+  // blank, it's zero. So the literal check never gates anything here.
+  // Replaced with period>=4 instead, matching what the check clearly
+  // intended (no result until Q4 actually has real data), same gate
+  // K4/M5 already use.
   // This is a separate, independent formula from K4/M5 (PPM and
   // Consensus) — a third opinion shown side by side for comparison, not
   // a replacement for either.
-  const F2isBlank = eg(gid,"F2").value === "";
-  const F3isBlank = eg(gid,"F3").value === "";
   let M4;
-  if(F2isBlank || F3isBlank){
+  if((st.period || 0) < 4){
     M4 = "";
   } else if(M3 === "Above Avg"){
     M4 = "Under";
