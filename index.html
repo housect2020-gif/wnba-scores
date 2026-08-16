@@ -225,6 +225,24 @@
     justify-content:center;
     gap:3px;
   }
+  .odds-5min{
+    margin-top:3px;
+    font-size:8px;
+    font-weight:400;
+    letter-spacing:0.03em;
+    color:#9aa0a6;
+    text-transform:uppercase;
+    line-height:1.3;
+    text-align:center;
+  }
+  .odds-5min .odds-5min-value{
+    display:block;
+    font-size:10px;
+    font-weight:700;
+    letter-spacing:0;
+    text-transform:none;
+    color:#3c4043;
+  }
   .k5-manual{
     display:inline-block !important;
     width:44px !important;
@@ -369,7 +387,7 @@
       &nbsp;&nbsp;<span id="reportDate"></span>
     </span>
   </div>
-  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_65</div>
+  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_66</div>
   <div id="debugLog" class="no-print" style="margin-top:6px;font-size:10.5px;color:#9aa0a6;word-break:break-all;"></div>
 
 </div>
@@ -594,6 +612,7 @@ function makeGameRowsHtml(gid){
             <option value="">–</option>
           </select>
         </div>
+        <div id="${gid}-oddsAt5min" class="odds-5min"></div>
       </td>
       <td class="formula" id="${gid}-L5">–</td>
       <td class="formula k4-cell" id="${gid}-M5">–</td>
@@ -864,6 +883,28 @@ function recalcGame(gid){
   const K5 = k5Raw === "" ? null : Number(k5Raw) + 0.5;
   const L3 = K5 === null ? "–" : fmt(Math.abs(sumQ13 - K5), 1);
   eg(gid,"L3").textContent = L3;
+
+  // Auto-capture K5 the first time the real Q4=5:00 snapshot is
+  // confirmed (st.q4Snapshot.away !== null) — same readiness check that
+  // protects the F2/F3 backfill from the premature-freeze bug we found
+  // earlier, so this can't grab a still-moving value from before the
+  // snapshot actually settled. Captured once, saved permanently, never
+  // updated again — a simple record of "what was my pick around the
+  // 5-minute mark," independent of any prediction formula.
+  if(st.oddsAt5min === undefined){
+    const saved5min = loadField(gid, "oddsAt5min");
+    st.oddsAt5min = saved5min !== null ? Number(saved5min) : null;
+  }
+  if(st.oddsAt5min === null && st.q4Snapshot.away !== null && K5 !== null){
+    st.oddsAt5min = K5;
+    saveField(gid, "oddsAt5min", String(K5));
+  }
+  const odds5minEl = eg(gid, "oddsAt5min");
+  if(odds5minEl){
+    odds5minEl.innerHTML = st.oddsAt5min !== null
+      ? `5min Odds<span class="odds-5min-value">${fmt(st.oddsAt5min, 1)}</span>`
+      : "";
+  }
 
   const L5 = K5 === null ? "–" : fmt(Math.abs(K5 - I5), 1);
   eg(gid,"L5").textContent = L5;
