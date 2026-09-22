@@ -234,7 +234,7 @@
 
 <footer>
   Season history is pulled live from ESPN's public WNBA scoreboard, one day at a time from the season start through today, and cached in this browser so it only has to happen once. Today's games refresh automatically while this page is open. No API key required.
-  <div style="margin-top:6px; color:#a7b2c2;" id="versionTag">2026_september_21</div>
+  <div style="margin-top:6px; color:#a7b2c2;" id="versionTag">version: loading…</div>
 </footer>
 
 </div>
@@ -271,9 +271,17 @@ let allRows = [];
 let CURRENT_FILTERED = [];
 let TODAY_SORT_DIR = 'asc';
 
+// Computes "today" in US Eastern time — where ESPN's own game dates are
+// anchored — rather than the viewer's local browser timezone. A viewer
+// well ahead of US Eastern (e.g. Europe) would otherwise get a "today"
+// that doesn't match ESPN's actual day boundary: a 7:30 PM EDT game
+// shows as roughly 1:30 AM the NEXT calendar day in Europe, so if the
+// page's own idea of "today" is also computed in the viewer's timezone,
+// dates and highlighting stop lining up with what ESPN actually means
+// by "today's games" — exactly the confusing "everything looks like
+// today" symptom this fixes.
 function todayStr(){
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
 }
 function ymdCompact(dateStr){ return dateStr.replaceAll('-', ''); }
 function addDays(dateStr, n){
@@ -281,11 +289,19 @@ function addDays(dateStr, n){
   d.setDate(d.getDate() + n);
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
+
+// Always shows the game's start time in US Eastern, labeled explicitly,
+// regardless of the viewer's own timezone — so the displayed time always
+// matches the date it's shown next to (both anchored to the same US
+// Eastern day), instead of silently converting to the viewer's local
+// time and rolling into a different calendar day. WNBA's regular season
+// (May-October) runs entirely within Eastern DAYLIGHT time, so "EDT" is
+// always correct for it — no need to detect EST here.
 function formatGameTime(iso){
   if(!iso) return '';
   const d = new Date(iso);
   if(isNaN(d.getTime())) return '';
-  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) + ' EDT';
 }
 
 function loadCache(){
@@ -846,6 +862,20 @@ async function init(){
 
   scheduleNextRefresh();
 }
+
+// Shows the file's actual last-modified date (as reported by the
+// browser/server) instead of a hand-typed version string, so it updates
+// itself whenever the file changes. Note: depends on GitHub Pages' CDN
+// correctly reporting a Last-Modified header — usually reliable, but not
+// guaranteed on every host.
+function renderVersionTag(){
+  const months = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+  const d = new Date(document.lastModified);
+  const stamp = `${d.getFullYear()}_${months[d.getMonth()]}_${String(d.getDate()).padStart(2,'0')} ${d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'})}`;
+  const el = document.getElementById('versionTag');
+  if(el) el.textContent = `version: ${stamp}`;
+}
+renderVersionTag();
 
 init();
 </script>
