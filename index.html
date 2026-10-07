@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WNBA Live Scores — Score Sheet</title>
+<title>NBA Live Scores — Score Sheet</title>
 <style>
   :root{
     --grid-line:#d0d3d8;
@@ -160,6 +160,7 @@
   }
   .light-yellow{color:#d4b700 !important;}
   select.light-yellow{color:#d4b700;}
+  .season-badge{display:inline-block; margin-right:8px; padding:0 6px; border-radius:3px; background:#e8eaed; color:#5f6368; font-size:10px; font-weight:700; letter-spacing:.4px; vertical-align:middle;}
   td.matchup-label{
     text-align:center;
     font-weight:600;
@@ -336,8 +337,8 @@
 <div class="wrap">
 
   <div class="topbar">
-    <h1>WNBA Live Scores — Score Sheet</h1>
-    <a href="wnba-records.html" style="color:#1a5cff; text-decoration:none; font-size:13px; font-weight:600;">Schedule &amp; Records →</a>
+    <h1>NBA Live Scores — Score Sheet</h1>
+    <a href="nba-records.html" style="color:#1a5cff; text-decoration:none; font-size:13px; font-weight:600;">Schedule &amp; Records →</a>
     <div class="status" id="statusPill">
       <span class="dot" id="statusDot"></span>
       <span id="statusText">Connecting…</span>
@@ -356,7 +357,7 @@
         <col style="width:4%">   <!-- Q3 -->
         <col style="width:5%">   <!-- Avg Q1-3 -->
         <col style="width:4.5%"> <!-- Q4=5 min -->
-        <col style="width:5.5%"> <!-- T=35 min -->
+        <col style="width:5.5%"> <!-- T=43 min -->
         <col style="width:4%">   <!-- Q4 -->
         <col style="width:6%">   <!-- Total -->
         <col style="width:6%">   <!-- O/U -->
@@ -372,7 +373,7 @@
       <tr class="hdr-row" id="hdrRow">
         <td class="rownum">1</td>
         <td>Team</td><td>Q1</td><td>Q2</td><td>Q3</td><td>Avg Q1-3</td>
-        <td>Q4=5 min</td><td>T=35 min</td><td>Q4</td><td>Total</td>
+        <td>Q4=5 min</td><td>T=43 min</td><td>Q4</td><td>Total</td>
         <td>O/U</td><td>Odds</td><td>Diff.</td><td>Suggested Pick</td>
       </tr>
       <tbody id="gamesBody"></tbody>
@@ -388,7 +389,7 @@
       &nbsp;&nbsp;<span id="reportDate"></span>
     </span>
   </div>
-  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_66</div>
+  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">version: loading…</div>
   <div id="debugLog" class="no-print" style="margin-top:6px;font-size:10.5px;color:#9aa0a6;word-break:break-all;"></div>
 
 </div>
@@ -435,7 +436,7 @@ function rebuildTableHeader(){
   let hdrHtml = `
     <td class="rownum">1</td>
     <td>Team</td><td>Q1</td><td>Q2</td><td>Q3</td><td>Avg Q1-3</td>
-    <td>Q4=5 min</td><td>T=35 min</td><td>Q4</td>
+    <td>Q4=5 min</td><td>T=43 min</td><td>Q4</td>
   `;
   for(let n=1;n<=extraOTCount;n++){ hdrHtml += `<td>Q${4+n}</td>`; }
   hdrHtml += `
@@ -485,10 +486,10 @@ function num(v){ const n = Number(v); return isNaN(n) ? 0 : n; }
 function round0(n){ return Math.round(n); }
 
 function saveField(gid, suffix, value){
-  try{ localStorage.setItem(`wnba_${suffix}_${gid}`, value); }catch(e){ /* storage unavailable — ignore */ }
+  try{ localStorage.setItem(`nba_${suffix}_${gid}`, value); }catch(e){ /* storage unavailable — ignore */ }
 }
 function loadField(gid, suffix){
-  try{ return localStorage.getItem(`wnba_${suffix}_${gid}`); }catch(e){ return null; }
+  try{ return localStorage.getItem(`nba_${suffix}_${gid}`); }catch(e){ return null; }
 }
 function round0AvgB4D4(B4, C4, D4){
   const avg = (B4 + C4 + D4) / 3;
@@ -562,7 +563,7 @@ function makeGameRowsHtml(gid){
       <td class="formula" id="${gid}-I3">–</td>
       <td>
         <select id="${gid}-J3" class="light-yellow">
-          ${Array.from({length:40}, (_,i)=>i+1).map(n=>`<option value="${n}"${n===5?" selected":""}>${n}</option>`).join("")}
+          ${Array.from({length:48}, (_,i)=>i+1).map(n=>`<option value="${n}"${n===5?" selected":""}>${n}</option>`).join("")}
         </select>
       </td>
       <td class="formula fit-line" id="${gid}-K3">–</td>
@@ -747,26 +748,43 @@ function rebuildK5Options(gid, center, preferredValue){
 //     margin/blowout adjustment — a margin-based override was tested
 //     and made accuracy WORSE (down to 9/18, 50%), so it was
 //     deliberately left out despite being intuitively appealing.
+// NBA PPM thresholds — ESTIMATES, not backtested. Derived by scaling the
+// WNBA values (4.60 / 4.20 / 5.20) by the pace ratio, NBA ~4.75 combined
+// points/min vs WNBA ~4.25 (about x1.12). Replace after real NBA games.
+const NBA_PPM_FLAT  = 5.15; // J3<=5: Over if required PPM <= this
+const NBA_PPM_OVER  = 4.70; // J3 6-47: clear Over at or below
+const NBA_PPM_UNDER = 5.80; // J3 6-47: clear Under at or above
+// Q4 snapshot is at 5:00 left = 7 of 12 minutes played; scale to a full quarter.
+const Q4_SNAPSHOT_SCALE = 12/7;
+
 function computeDecision(k5, g2, g3, j3, e5, g5, l4){
   if(k5 === null) return { k4raw: null, m5Ppm: "", m5Consensus: "" };
   const requiredPPM = (k5 - (g2 + g3)) / j3;
   let m5Ppm;
-  if(j3 >= 40 || j3 <= 0){
+  if(j3 >= 48 || j3 <= 0){
     m5Ppm = "";
   } else if(j3 <= 5){
-    m5Ppm = requiredPPM <= 4.60 ? "Over" : "Under";
-  } else if(requiredPPM <= 4.20){
+    m5Ppm = requiredPPM <= NBA_PPM_FLAT ? "Over" : "Under";
+  } else if(requiredPPM <= NBA_PPM_OVER){
     m5Ppm = "Over";
-  } else if(requiredPPM >= 5.20){
+  } else if(requiredPPM >= NBA_PPM_UNDER){
     m5Ppm = "Under";
   } else {
-    const currentPace = (g2 + g3) / (40 - j3);
+    const currentPace = (g2 + g3) / (48 - j3);
     m5Ppm = currentPace >= requiredPPM ? "Over" : "Under";
   }
   const consensus = (e5 + g5 + l4) / 3;
   const m5Consensus = consensus > k5 ? "Over" : "Under";
   return { k4raw: requiredPPM, m5Ppm, m5Consensus };
 }
+
+// Row 5 (B5-G5) now uses NBA numbers (12-min quarters, 48-min game).
+// L4/J3 range use 48 minutes; M4 uses F4<=15. PPM thresholds and the M3
+// multiplier are NBA estimates (see NBA_PPM_* and Q4_SNAPSHOT_SCALE).
+// Set false to blank all prediction cells (L4, M3, M4, M5, K4). Raw data (Q1-Q4, OT, totals, the Q4=5min
+// snapshot F, T=35 G, odds, J4/K5) all keep working.
+// Set to true once NBA formulas are put in recalcGame / computeDecision.
+const FORMULAS_READY = true;
 
 function recalcGame(gid){
   const st = gameState[gid] || {};
@@ -813,20 +831,20 @@ function recalcGame(gid){
   const combined = round0(sumQ13 + avgRounded);
   eg(gid,"K3").textContent = `${round0(sumQ13)} (Avg: ${avgRounded}) = ${combined}`;
 
-  // L4 = MROUND((G2+G3)*(40/(40-J3)), 0.5)
+  // L4 = MROUND((G2+G3)*(48/(48-J3)), 0.5)
   const J3 = Number(eg(gid,"J3").value) || 5;
-  const timeLeftDenom = 40 - J3;
-  const L4 = timeLeftDenom !== 0 ? mround((G2+G3)*(40/timeLeftDenom), 0.5) : NaN;
+  const timeLeftDenom = 48 - J3;
+  const L4 = timeLeftDenom !== 0 ? mround((G2+G3)*(48/timeLeftDenom), 0.5) : NaN;
   eg(gid,"L4").textContent = fmt(L4, 1);
 
-  // Row 5 (Predicted) — Q4 window is 5 min, full-game basis is 40 min
-  const B5 = (B4/10)*40;
-  const C5 = (C4/10)*40;
-  const D5 = (D4/10)*40;
+  // Row 5 (Predicted) — NBA: 12-min quarters, full-game basis is 48 min
+  const B5 = (B4/12)*48;
+  const C5 = (C4/12)*48;
+  const D5 = (D4/12)*48;
   const E5 = (B5+C5+D5)/3;
-  const F5 = (F4/5)*40;
+  const F5 = (F4/5)*48;
   const validQtrs = [B5,C5,D5].filter(v => !isNaN(v)).length;
-  const G5 = (B5+C5+D5 + ((F4*2)/10)*40) / (validQtrs + 1);
+  const G5 = (B5+C5+D5 + ((F4*2)/12)*48) / (validQtrs + 1);
   const I5 = I2+I3;
 
   eg(gid,"B5").textContent = fmt(B5);
@@ -843,7 +861,7 @@ function recalcGame(gid){
   // and a freshly typed value should likewise immediately override
   // whatever was previously picked. Before either has ever been touched,
   // fall back to the real sportsbook total when ESPN provides one
-  // (typically 150-200 for a WNBA game); the live running score (I5) is
+  // (typically 200-250 for an NBA game); the live running score (I5) is
   // only a fraction of that until very late in the game, so it's used
   // only as a last resort.
   const k5ManualRaw = eg(gid,"K5manual").value.trim();
@@ -874,9 +892,9 @@ function recalcGame(gid){
   if(F4 === 0){
     M3 = "";
   } else if(F4 >= 23){
-    M3 = (avgB4D4 > (F4*2)) ? "Below Avg" : "Above Avg";
+    M3 = (avgB4D4 > (F4*Q4_SNAPSHOT_SCALE)) ? "Below Avg" : "Above Avg";
   } else {
-    M3 = (avgB4D4 > (F4*2)) ? "Below Avg" : "Above Avg";
+    M3 = (avgB4D4 > (F4*Q4_SNAPSHOT_SCALE)) ? "Below Avg" : "Above Avg";
   }
   eg(gid,"M3").textContent = M3 === "" ? "–" : M3;
 
@@ -933,7 +951,7 @@ function recalcGame(gid){
     M4 = "Under";
   } else if(M3 === "Below Avg"){
     M4 = "Over";
-  } else if(F4 <= 9){
+  } else if(F4 <= 15){
     M4 = "Over";
   } else if(K5 !== null && K5 > G5){
     M4 = "Over";
@@ -998,9 +1016,14 @@ function recalcGame(gid){
   const l5El = eg(gid,"L5");
   l5El.classList.remove("grand-total", "pred-total");
   l5El.classList.add(pickWinning ? "grand-total" : "pred-total");
+
+  if(!FORMULAS_READY){
+    ["L4","M3","M4","M5"].forEach(c => { eg(gid,c).textContent = "–"; });
+    eg(gid,"K4").innerHTML = "–";
+  }
 }
 
-function applyGameData(gid, away, home, status, overUnder){
+function applyGameData(gid, away, home, status, overUnder, seasonType){
   ensureGameBlock(gid);
   const st = gameState[gid];
   // Stash the market total (if ESPN has one for this game) so recalcGame
@@ -1092,7 +1115,18 @@ function applyGameData(gid, away, home, status, overUnder){
   } else {
     statusText = "Final";
   }
-  eg(gid,"matchup").textContent = `${away.name} @ ${home.name} — ${statusText}`;
+  // Season badge at the start of the label: PRE (preseason) or PLAYOFFS;
+  // nothing for the regular season.
+  const matchupEl = eg(gid,"matchup");
+  matchupEl.textContent = `${away.name} @ ${home.name} — ${statusText}`;
+  const badgeText = seasonType === 1 ? "PRE" : (seasonType === 3 ? "PLAYOFFS" : "");
+  if(badgeText){
+    const badge = document.createElement("span");
+    badge.className = "season-badge";
+    badge.textContent = badgeText;
+    badge.title = seasonType === 1 ? "Preseason game" : "Playoff game";
+    matchupEl.insertBefore(badge, matchupEl.firstChild);
+  }
 
   // J4: ESPN embeds the pre-game betting total directly in the same
   // payload we already poll for scores — no separate odds API/key/quota
@@ -1121,7 +1155,7 @@ function applyGameData(gid, away, home, status, overUnder){
   recalcGame(gid);
 }
 
-const SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/scoreboard";
+const SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard";
 
 const PROXIES = [
   url => url,
@@ -1180,7 +1214,7 @@ async function backfillQ4Snapshot(gid, away, home, allowRetry){
   const st = gameState[gid];
   if(!st) return;
   const eventId = gid.slice(1); // strip leading "g"
-  const summaryTarget = `https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/summary?event=${eventId}`;
+  const summaryTarget = `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=${eventId}`;
   const awayQ13 = away.q1 + away.q2 + away.q3;
   const homeQ13 = home.q1 + home.q2 + home.q3;
 
@@ -1365,7 +1399,9 @@ function parseEvent(ev){
     away: toTeam(awayC),
     home: toTeam(homeC),
     status: { period, clock, state, detail },
-    overUnder
+    overUnder,
+    // ESPN season type: 1 = preseason, 2 = regular season, 3 = playoffs
+    seasonType: (ev.season && ev.season.type) || null
   };
 }
 
@@ -1398,7 +1434,7 @@ async function fetchScores(){
 
     if(parsedList.length === 0){
       setGlobalStatus("No games found", false);
-      showBanner("No WNBA games found for today's date window yet. Retrying automatically — you can also enter scores manually below.");
+      showBanner("No NBA games found for today's date window yet. Retrying automatically — you can also enter scores manually below.");
       failCount++;
       if(failCount >= 2 && Object.keys(gameState).length === 0) enableManualFallbackBlock();
       return;
@@ -1420,7 +1456,7 @@ async function fetchScores(){
     for(const g of parsedList){
       const gid = "g" + g.id;
       ensureGameBlock(gid); // safe no-op if the block already exists
-      applyGameData(gid, g.away, g.home, g.status, g.overUnder);
+      applyGameData(gid, g.away, g.home, g.status, g.overUnder, g.seasonType);
     }
 
     $("lastUpdated").textContent = new Date().toLocaleTimeString();
@@ -1543,7 +1579,7 @@ function simulateGames(configs){
     const hasOverride = cfg && cfg.awayF !== undefined && cfg.homeF !== undefined;
     simulatedGids.set(gid, hasOverride ? { away: cfg.awayF, home: cfg.homeF } : null);
     ensureGameBlock(gid);
-    applyGameData(gid, g.away, g.home, g.status, g.overUnder);
+    applyGameData(gid, g.away, g.home, g.status, g.overUnder, g.seasonType);
   }
 
   const liveCount = parsedList.filter(g => g.status.state === "in").length;
@@ -1584,11 +1620,21 @@ function updateReportDate(isoDateStr){
   const monthShort = d.toLocaleString("en-US", { month: "short" });
   const year = d.getFullYear();
   $("reportDate").textContent = `${day} ${month} ${year}`;
-  document.title = `WNBA Live Score -- Score Sheet_${day}${monthShort}${year}`;
+  document.title = `NBA Live Score -- Score Sheet_${day}${monthShort}${year}`;
 }
 updateReportDate(); // placeholder (today) until the first successful fetch sets the real game date
 
 $("downloadPdfBtn").addEventListener("click", ()=> window.print());
+
+// Version tag from the file's own last-modified time, same format as the
+// records page: version: 2026_october_05 3:07 AM
+(function renderVersionTag(){
+  const months = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+  const d = new Date(document.lastModified);
+  const stamp = `${d.getFullYear()}_${months[d.getMonth()]}_${String(d.getDate()).padStart(2,'0')} ${d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'})}`;
+  const el = document.getElementById('versionLine');
+  if(el) el.textContent = `version: ${stamp}`;
+})();
 
 fetchScores();
 </script>
