@@ -389,7 +389,7 @@
       &nbsp;&nbsp;<span id="reportDate"></span>
     </span>
   </div>
-  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">2026_august_66</div>
+  <div id="versionLine" style="text-align:right;font-size:10.5px;color:#9aa0a6;margin-top:2px;">version: loading…</div>
   <div id="debugLog" class="no-print" style="margin-top:6px;font-size:10.5px;color:#9aa0a6;word-break:break-all;"></div>
 
 </div>
@@ -1153,12 +1153,23 @@ function ymd(d){
 // games specifically; the narrow ±1 day window is only a timezone-mismatch fallback.
 // A cache-busting timestamp is appended so proxies (many of which cache by
 // exact URL) and the browser can't serve back a stale response.
+// The "sports day" in US Eastern time: rolls over at 4 AM ET so late
+// West-coast games (ending after midnight ET) still belong to the night
+// they started. ESPN's un-dated default can jump to the next day's slate
+// as soon as the evening's games finish, which hid tonight's games.
+function sportsDayET(){
+  const shifted = new Date(Date.now() - 4*60*60*1000);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" })
+    .format(shifted).replaceAll("-", "");
+}
+
 function targetUrls(){
   const today = new Date();
   const start = new Date(today); start.setDate(start.getDate() - 1);
   const end = new Date(today); end.setDate(end.getDate() + 1);
   const bust = `_=${Date.now()}`;
   return [
+    `${SCOREBOARD_URL}?dates=${sportsDayET()}&${bust}`,
     `${SCOREBOARD_URL}?${bust}`,
     `${SCOREBOARD_URL}?dates=${ymd(start)}-${ymd(end)}&${bust}`
   ];
@@ -1396,6 +1407,7 @@ async function fetchScores(){
         const data = await res.json();
         events = data.events || [];
         attemptLog.push(`${shortUrl(url)} → OK, ${events.length} events`);
+        if(events.length === 0) continue; // nothing for that day — try the next URL
         break;
       } catch(e){
         attemptLog.push(`${shortUrl(url)} → FAILED: ${e.message || e}`);
@@ -1590,17 +1602,29 @@ window.simulateGames = simulateGames;
 // Keeping it updated at the source instead means iOS's snapshot,        
 // whenever it happens, still catches the right value.
 function updateReportDate(isoDateStr){
-  const d = isoDateStr ? new Date(isoDateStr) : new Date();
-  const day = d.getDate();
-  const month = d.toLocaleString("en-US", { month: "long" });
-  const monthShort = d.toLocaleString("en-US", { month: "short" });
-  const year = d.getFullYear();
+  // Always the US Eastern calendar date, wherever the viewer is.
+  const d = isoDateStr ? new Date(isoDateStr) : new Date(Date.now() - 4*60*60*1000);
+  const et = { timeZone: "America/New_York" };
+  const day = Number(d.toLocaleString("en-US", { ...et, day: "numeric" }));
+  const month = d.toLocaleString("en-US", { ...et, month: "long" });
+  const monthShort = d.toLocaleString("en-US", { ...et, month: "short" });
+  const year = Number(d.toLocaleString("en-US", { ...et, year: "numeric" }));
   $("reportDate").textContent = `${day} ${month} ${year}`;
   document.title = `WNBA Live Score -- Score Sheet_${day}${monthShort}${year}`;
 }
 updateReportDate(); // placeholder (today) until the first successful fetch sets the real game date
 
 $("downloadPdfBtn").addEventListener("click", ()=> window.print());
+
+// Version tag from the file's own last-modified time, same format as the
+// records page: version: 2026_october_06 10:49 PM
+(function renderVersionTag(){
+  const months = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+  const d = new Date(document.lastModified);
+  const stamp = `${d.getFullYear()}_${months[d.getMonth()]}_${String(d.getDate()).padStart(2,'0')} ${d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'})}`;
+  const el = document.getElementById('versionLine');
+  if(el) el.textContent = `version: ${stamp}`;
+})();
 
 fetchScores();
 </script>
